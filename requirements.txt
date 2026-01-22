@@ -1,0 +1,16 @@
+# Core
+pydantic>=2.0
+anthropic>=0.18.0
+
+# Audio/Video
+openai-whisper
+openai>=1.0.0
+
+# Utilities
+python-dotenv
+rich
+click
+
+# Development
+pytest
+pytest-asyncio
