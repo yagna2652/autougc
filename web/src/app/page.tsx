@@ -65,6 +65,8 @@ export default function Home() {
   } | null>(null);
   const [suggestedScript, setSuggestedScript] = useState("");
   const [analysisError, setAnalysisError] = useState<string | null>(null);
+  const [uploadedImageUrl, setUploadedImageUrl] = useState<string | null>(null);
+  const [useImageToVideo, setUseImageToVideo] = useState(true);
 
   const handleAnalyzeTikTok = async () => {
     if (!tiktokUrl) return;
@@ -95,11 +97,15 @@ export default function Home() {
     if (e.target.files) {
       const files = Array.from(e.target.files);
       setProductImages((prev) => [...prev, ...files].slice(0, 9));
+      // Clear uploaded URL when images change so we re-upload
+      setUploadedImageUrl(null);
     }
   };
 
   const removeImage = (index: number) => {
     setProductImages((prev) => prev.filter((_, i) => i !== index));
+    // Clear uploaded URL when images change so we re-upload
+    setUploadedImageUrl(null);
   };
 
   // Compress and resize image to reduce payload size for Claude API
@@ -242,21 +248,68 @@ SCRIPT REFERENCE:
     setIsGenerating(true);
     setGenerationError(null);
     setGeneratedVideoUrl(null);
-    setGenerationProgress("Submitting generation request...");
+    setGenerationProgress("Preparing generation...");
     setGenerationCount((prev) => prev + 1);
 
     try {
+      let imageUrl = uploadedImageUrl;
+
+      // If using image-to-video and we have product images but no uploaded URL yet, upload first
+      if (useImageToVideo && productImages.length > 0 && !uploadedImageUrl) {
+        setGenerationProgress("Uploading product image...");
+
+        // Compress the first product image and upload it
+        const base64Image = await compressImage(productImages[0], 1024, 0.85);
+
+        const uploadResponse = await fetch("/api/upload", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({ base64Image }),
+        });
+
+        const uploadData = await uploadResponse.json();
+
+        if (!uploadResponse.ok) {
+          throw new Error(uploadData.error || "Failed to upload product image");
+        }
+
+        imageUrl = uploadData.url;
+        setUploadedImageUrl(imageUrl);
+        console.log("Product image uploaded:", imageUrl);
+      }
+
+      setGenerationProgress("Submitting generation request...");
+
+      // Build request body
+      const requestBody: {
+        prompt: string;
+        model: string;
+        duration: number;
+        aspectRatio: string;
+        imageUrl?: string;
+      } = {
+        prompt: generatedPrompt,
+        model: selectedModel,
+        duration: 5,
+        aspectRatio: "9:16",
+      };
+
+      // Add image URL if using image-to-video mode
+      if (useImageToVideo && imageUrl) {
+        requestBody.imageUrl = imageUrl;
+        setGenerationProgress("Generating video from product image...");
+      } else {
+        setGenerationProgress("Generating video from text prompt...");
+      }
+
       const response = await fetch("/api/generate", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({
-          prompt: generatedPrompt,
-          model: selectedModel,
-          duration: 5,
-          aspectRatio: "9:16",
-        }),
+        body: JSON.stringify(requestBody),
       });
 
       const data = await response.json();
@@ -272,7 +325,8 @@ SCRIPT REFERENCE:
 
       if (data.success && data.videoUrl) {
         setGeneratedVideoUrl(data.videoUrl);
-        setGenerationProgress("Video generated successfully!");
+        const mode = data.usedProductImage ? "image-to-video" : "text-to-video";
+        setGenerationProgress(`Video generated successfully! (${mode})`);
       } else {
         throw new Error("No video URL returned");
       }
@@ -678,6 +732,80 @@ SCRIPT REFERENCE:
                 </p>
               </div>
 
+              {/* Image-to-Video Toggle */}
+              {productImages.length > 0 && (
+                <div className="space-y-3">
+                  <Separator />
+                  <div className="flex items-center justify-between">
+                    <div className="space-y-0.5">
+                      <Label htmlFor="use-i2v" className="text-base">
+                        Use Product Image
+                      </Label>
+                      <p className="text-xs text-muted-foreground">
+                        Use image-to-video mode for accurate product appearance
+                      </p>
+                    </div>
+                    <label className="relative inline-flex items-center cursor-pointer">
+                      <input
+                        type="checkbox"
+                        id="use-i2v"
+                        checked={useImageToVideo}
+                        onChange={(e) => setUseImageToVideo(e.target.checked)}
+                        className="sr-only peer"
+                      />
+                      <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-primary/20 rounded-full peer dark:bg-gray-700 peer-checked:after:translate-x-full rtl:peer-checked:after:-translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:start-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all dark:border-gray-600 peer-checked:bg-primary"></div>
+                    </label>
+                  </div>
+
+                  {useImageToVideo && (
+                    <div className="rounded-lg border border-border bg-muted/30 p-3 space-y-2">
+                      <div className="flex items-center gap-2">
+                        <Badge variant="default" className="bg-green-600">
+                          Image-to-Video
+                        </Badge>
+                        <span className="text-xs text-muted-foreground">
+                          Product image will be used as the starting frame
+                        </span>
+                      </div>
+                      <div className="flex items-center gap-3">
+                        <div className="w-16 h-16 rounded-md overflow-hidden border border-border bg-background">
+                          <img
+                            src={URL.createObjectURL(productImages[0])}
+                            alt="Product"
+                            className="w-full h-full object-cover"
+                          />
+                        </div>
+                        <div className="text-xs text-muted-foreground space-y-1">
+                          <p>
+                            <strong>File:</strong> {productImages[0].name}
+                          </p>
+                          <p>
+                            <strong>Size:</strong>{" "}
+                            {(productImages[0].size / 1024).toFixed(1)} KB
+                          </p>
+                          {uploadedImageUrl && (
+                            <p className="text-green-600">
+                              ✓ Uploaded to Fal storage
+                            </p>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
+                  {!useImageToVideo && (
+                    <div className="rounded-lg border border-border bg-muted/30 p-3">
+                      <div className="flex items-center gap-2">
+                        <Badge variant="outline">Text-to-Video</Badge>
+                        <span className="text-xs text-muted-foreground">
+                          AI will imagine the product from the text description
+                        </span>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+
               {/* Progress indicator */}
               {isGenerating && (
                 <VideoGenerationLoader
@@ -741,10 +869,14 @@ SCRIPT REFERENCE:
                   className="flex-1"
                 >
                   {isGenerating
-                    ? "Generating..."
+                    ? useImageToVideo && productImages.length > 0
+                      ? "Generating from image..."
+                      : "Generating..."
                     : generatedVideoUrl
                       ? "Regenerate Video"
-                      : `Generate Video (~$${selectedModel === "sora2" ? "0.50" : "0.35"} for 5s)`}
+                      : useImageToVideo && productImages.length > 0
+                        ? `Generate from Image (~$${selectedModel === "sora2" ? "0.50" : "0.35"} for 5s)`
+                        : `Generate Video (~$${selectedModel === "sora2" ? "0.50" : "0.35"} for 5s)`}
                 </Button>
               </div>
             </CardContent>

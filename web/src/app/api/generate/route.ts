@@ -8,9 +8,14 @@ fal.config({
 
 // Model endpoints on Fal.ai
 const MODEL_ENDPOINTS = {
+  // Text-to-video endpoints
   sora2: "fal-ai/sora-2/text-to-video",
   sora2pro: "fal-ai/sora-2/text-to-video/pro",
   kling: "fal-ai/kling-video/v2.5-turbo/pro/text-to-video",
+  // Image-to-video endpoints
+  sora2_i2v: "fal-ai/sora-2/image-to-video",
+  sora2pro_i2v: "fal-ai/sora-2/image-to-video/pro",
+  kling_i2v: "fal-ai/kling-video/v2.5-turbo/pro/image-to-video",
 } as const;
 
 type ModelType = keyof typeof MODEL_ENDPOINTS;
@@ -20,9 +25,10 @@ type KlingDuration = "5" | "10";
 
 interface GenerateRequest {
   prompt: string;
-  model: ModelType;
+  model: "sora2" | "sora2pro" | "kling";
   duration?: number; // seconds
   aspectRatio?: AspectRatio;
+  imageUrl?: string; // Product image URL for image-to-video
 }
 
 interface FalVideoResult {
@@ -49,7 +55,7 @@ export async function POST(request: NextRequest) {
 
     // Parse request body
     const body: GenerateRequest = await request.json();
-    const { prompt, model, duration = 4 } = body;
+    const { prompt, model, duration = 4, imageUrl } = body;
     const aspectRatio: AspectRatio = body.aspectRatio || "9:16";
 
     // Validate required fields
@@ -60,17 +66,27 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    if (!model || !MODEL_ENDPOINTS[model]) {
+    const validBaseModels = ["sora2", "sora2pro", "kling"];
+    if (!model || !validBaseModels.includes(model)) {
       return NextResponse.json(
         {
           error: "Invalid model",
-          validModels: Object.keys(MODEL_ENDPOINTS),
+          validModels: validBaseModels,
         },
         { status: 400 },
       );
     }
 
-    const endpoint = MODEL_ENDPOINTS[model];
+    // Determine if we should use image-to-video or text-to-video
+    const useImageToVideo = !!imageUrl;
+
+    // Select the appropriate endpoint
+    let endpoint: string;
+    if (useImageToVideo) {
+      endpoint = MODEL_ENDPOINTS[`${model}_i2v` as ModelType];
+    } else {
+      endpoint = MODEL_ENDPOINTS[model as ModelType];
+    }
 
     // Truncate prompt if too long (Fal.ai has limits)
     const maxPromptLength = 1500;
@@ -80,32 +96,48 @@ export async function POST(request: NextRequest) {
         : prompt.trim();
 
     console.log(`🎬 Starting video generation with ${model}...`);
+    console.log(
+      `   Mode: ${useImageToVideo ? "image-to-video" : "text-to-video"}`,
+    );
     console.log(`   Endpoint: ${endpoint}`);
     console.log(`   Duration: ${duration}s`);
     console.log(`   Aspect Ratio: ${aspectRatio}`);
+    if (useImageToVideo) {
+      console.log(`   Image URL: ${imageUrl.substring(0, 100)}...`);
+    }
     console.log(`   Prompt length: ${truncatedPrompt.length} chars`);
     console.log(`   Prompt: ${truncatedPrompt.substring(0, 100)}...`);
 
-    // Build arguments based on model
+    // Build arguments based on model and mode
     // Kling uses string duration ("5" or "10"), Sora uses integer (4, 8, or 12)
     const klingDuration: KlingDuration = duration <= 5 ? "5" : "10";
     const soraDuration = duration <= 4 ? 4 : duration <= 8 ? 8 : 12;
 
-    // Submit generation request and wait for result
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const input: any =
-      model === "kling"
-        ? {
-            prompt: truncatedPrompt,
-            aspect_ratio: aspectRatio,
-            duration: klingDuration,
-          }
-        : {
-            prompt: truncatedPrompt,
-            aspect_ratio: aspectRatio,
-            duration: soraDuration,
-          };
+    let input: any;
 
+    if (model === "kling") {
+      input = {
+        prompt: truncatedPrompt,
+        aspect_ratio: aspectRatio,
+        duration: klingDuration,
+      };
+      if (useImageToVideo && imageUrl) {
+        input.image_url = imageUrl;
+      }
+    } else {
+      // Sora 2 / Sora 2 Pro
+      input = {
+        prompt: truncatedPrompt,
+        aspect_ratio: aspectRatio,
+        duration: soraDuration,
+      };
+      if (useImageToVideo && imageUrl) {
+        input.image_url = imageUrl;
+      }
+    }
+
+    // Submit generation request and wait for result
     const result = await fal.subscribe(endpoint, {
       input,
       logs: true,
@@ -136,8 +168,10 @@ export async function POST(request: NextRequest) {
       success: true,
       videoUrl: data.video.url,
       model,
+      mode: useImageToVideo ? "image-to-video" : "text-to-video",
       duration,
       aspectRatio,
+      usedProductImage: useImageToVideo,
     });
   } catch (error) {
     console.error("❌ Video generation error:", error);
@@ -186,9 +220,13 @@ export async function GET() {
   return NextResponse.json({
     status: "ok",
     configured: hasApiKey,
-    models: Object.keys(MODEL_ENDPOINTS),
+    models: ["sora2", "sora2pro", "kling"],
+    capabilities: {
+      textToVideo: true,
+      imageToVideo: true,
+    },
     hint: hasApiKey
-      ? "API is ready for video generation"
+      ? "API is ready for video generation (text-to-video and image-to-video supported)"
       : "Set FAL_KEY in .env.local to enable video generation",
   });
 }
