@@ -5,6 +5,16 @@ const anthropic = new Anthropic({
   apiKey: process.env.ANTHROPIC_API_KEY,
 });
 
+interface ProductContext {
+  type?: string;
+  interactions?: string[];
+  tactileFeatures?: string[];
+  soundFeatures?: string[];
+  sizeDescription?: string;
+  highlightFeature?: string;
+  customInstructions?: string;
+}
+
 interface AnalyzeRequest {
   productImages: string[]; // base64 encoded images
   productDescription?: string;
@@ -18,6 +28,70 @@ interface AnalyzeRequest {
     energy: string;
     duration: number;
   };
+  fullBlueprint?: Record<string, unknown>; // Full blueprint for mechanics generation
+  enableMechanics?: boolean; // Whether to generate mechanics-enhanced prompt
+  productCategory?: string; // Product category for mechanics (skincare, supplement, etc.)
+  productContext?: ProductContext; // Rich product context for custom mechanics
+}
+
+const PYTHON_API_URL = process.env.PYTHON_API_URL || "http://localhost:8000";
+
+/**
+ * Convert camelCase product context to snake_case for Python API
+ */
+function convertProductContext(ctx?: ProductContext) {
+  if (!ctx) return null;
+  return {
+    type: ctx.type || "",
+    interactions: ctx.interactions || [],
+    tactile_features: ctx.tactileFeatures || [],
+    sound_features: ctx.soundFeatures || [],
+    size_description: ctx.sizeDescription || "",
+    highlight_feature: ctx.highlightFeature || "",
+    custom_instructions: ctx.customInstructions || "",
+  };
+}
+
+/**
+ * Generate mechanics-enhanced prompt from blueprint data
+ */
+async function generateMechanicsPrompt(
+  blueprint: Record<string, unknown>,
+  basePrompt: string,
+  productCategory: string,
+  duration: number,
+  energyLevel: string,
+  productContext?: ProductContext,
+): Promise<string | null> {
+  try {
+    const response = await fetch(
+      `${PYTHON_API_URL}/api/v1/mechanics/generate`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          blueprint,
+          base_prompt: basePrompt,
+          product_category: productCategory,
+          product_context: convertProductContext(productContext),
+          target_duration: duration,
+          energy_level: energyLevel,
+          include_realism_preamble: true,
+        }),
+      },
+    );
+
+    if (!response.ok) {
+      console.error("Mechanics API error:", await response.text());
+      return null;
+    }
+
+    const data = await response.json();
+    return data.mechanics_prompt;
+  } catch (error) {
+    console.error("Failed to generate mechanics:", error);
+    return null;
+  }
 }
 
 export async function POST(request: NextRequest) {
@@ -34,7 +108,15 @@ export async function POST(request: NextRequest) {
     }
 
     const body: AnalyzeRequest = await request.json();
-    const { productImages, productDescription, blueprintData } = body;
+    const {
+      productImages,
+      productDescription,
+      blueprintData,
+      fullBlueprint,
+      enableMechanics,
+      productCategory,
+      productContext,
+    } = body;
 
     if (!productImages || productImages.length === 0) {
       return NextResponse.json(
@@ -97,6 +179,28 @@ Original script reference:
 `;
     }
 
+    // Build product context if provided
+    let productContextInfo = "";
+    if (productContext) {
+      const contextParts = [];
+      if (productContext.type) contextParts.push(`Product Type: ${productContext.type}`);
+      if (productContext.interactions?.length) contextParts.push(`Key Interactions: ${productContext.interactions.join(", ")}`);
+      if (productContext.tactileFeatures?.length) contextParts.push(`Tactile Features: ${productContext.tactileFeatures.join(", ")}`);
+      if (productContext.soundFeatures?.length) contextParts.push(`Sound Features: ${productContext.soundFeatures.join(", ")}`);
+      if (productContext.sizeDescription) contextParts.push(`Size: ${productContext.sizeDescription}`);
+      if (productContext.highlightFeature) contextParts.push(`Key Feature to Highlight: ${productContext.highlightFeature}`);
+      if (productContext.customInstructions) contextParts.push(`Custom Instructions: ${productContext.customInstructions}`);
+
+      if (contextParts.length > 0) {
+        productContextInfo = `
+IMPORTANT - User-specified product details to incorporate:
+${contextParts.join("\n")}
+
+Make sure the video prompt emphasizes these specific product characteristics, especially any tactile feedback, sounds, or size context.
+`;
+      }
+    }
+
     // Call Claude Vision API
     const response = await anthropic.messages.create({
       model: "claude-sonnet-4-20250514",
@@ -115,6 +219,7 @@ Analyze the product image(s) provided and generate a detailed video prompt that 
 ${productDescription ? `Product description from user: "${productDescription}"` : ""}
 
 ${blueprintContext}
+${productContextInfo}
 
 Your task:
 1. Identify the product (type, color, size, brand if visible, key features)
@@ -180,10 +285,24 @@ Return ONLY valid JSON, no other text.`,
       );
     }
 
+    // If mechanics enhancement is enabled and we have a full blueprint, generate mechanics prompt
+    let mechanicsPrompt: string | null = null;
+    if (enableMechanics && fullBlueprint) {
+      mechanicsPrompt = await generateMechanicsPrompt(
+        fullBlueprint,
+        analysisResult.videoPrompt,
+        productCategory || "general",
+        blueprintData?.duration || 8,
+        blueprintData?.energy || "medium",
+        productContext,
+      );
+    }
+
     return NextResponse.json({
       success: true,
       analysis: analysisResult.productAnalysis,
       prompt: analysisResult.videoPrompt,
+      mechanicsPrompt: mechanicsPrompt, // Enhanced prompt with human mechanics
       suggestedScript: analysisResult.suggestedScript,
     });
   } catch (error) {

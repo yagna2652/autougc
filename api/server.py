@@ -47,14 +47,20 @@ async def root():
             "health": "/health",
             "analyze": "POST /api/v1/analyze",
             "job_status": "GET /api/v1/jobs/{job_id}",
+            "mechanics_generate": "POST /api/v1/mechanics/generate",
+            "mechanics_from_style": "POST /api/v1/mechanics/from-style",
+            "mechanics_enhance": "POST /api/v1/mechanics/enhance",
+            "mechanics_templates": "GET /api/v1/mechanics/templates",
         },
     }
 
 
 # Import and include routers
 from api.routes import analyze
+from api.routes import mechanics
 
 app.include_router(analyze.router, prefix="/api/v1", tags=["analysis"])
+app.include_router(mechanics.router, prefix="/api/v1", tags=["mechanics"])
 
 
 if __name__ == "__main__":

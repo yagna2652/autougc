@@ -69,6 +69,16 @@ export default function Home() {
   const [useImageToVideo, setUseImageToVideo] = useState(true);
   const [analysisProgress, setAnalysisProgress] = useState<string>("");
 
+  // Product Context fields for custom mechanics
+  const [showAdvancedProduct, setShowAdvancedProduct] = useState(false);
+  const [productType, setProductType] = useState("");
+  const [productInteractions, setProductInteractions] = useState("");
+  const [tactileFeatures, setTactileFeatures] = useState("");
+  const [soundFeatures, setSoundFeatures] = useState("");
+  const [sizeDescription, setSizeDescription] = useState("");
+  const [highlightFeature, setHighlightFeature] = useState("");
+  const [customInstructions, setCustomInstructions] = useState("");
+
   const handleAnalyzeTikTok = async () => {
     if (!tiktokUrl) return;
 
@@ -277,6 +287,20 @@ SCRIPT REFERENCE:
         productImages.slice(0, 3).map((file) => compressImage(file, 800, 0.7)),
       );
 
+      // Build product context if any advanced fields are filled
+      const hasProductContext = productType || productInteractions || tactileFeatures ||
+        soundFeatures || sizeDescription || highlightFeature || customInstructions;
+
+      const productContext = hasProductContext ? {
+        type: productType,
+        interactions: productInteractions.split(",").map(s => s.trim()).filter(Boolean),
+        tactileFeatures: tactileFeatures.split(",").map(s => s.trim()).filter(Boolean),
+        soundFeatures: soundFeatures.split(",").map(s => s.trim()).filter(Boolean),
+        sizeDescription,
+        highlightFeature,
+        customInstructions,
+      } : undefined;
+
       const response = await fetch("/api/analyze", {
         method: "POST",
         headers: {
@@ -286,6 +310,7 @@ SCRIPT REFERENCE:
           productImages: base64Images,
           productDescription,
           blueprintData,
+          productContext,
         }),
       });
 
@@ -630,6 +655,106 @@ SCRIPT REFERENCE:
                   onChange={(e) => setProductDescription(e.target.value)}
                   rows={3}
                 />
+              </div>
+
+              {/* Advanced Product Details (Collapsible) */}
+              <div className="border border-border rounded-lg overflow-hidden">
+                <button
+                  type="button"
+                  onClick={() => setShowAdvancedProduct(!showAdvancedProduct)}
+                  className="w-full px-4 py-3 flex items-center justify-between bg-muted/50 hover:bg-muted transition-colors"
+                >
+                  <span className="font-medium text-sm">Advanced Product Details</span>
+                  <span className="text-muted-foreground text-xs">
+                    {showAdvancedProduct ? "▲ Hide" : "▼ Show"} (for custom mechanics)
+                  </span>
+                </button>
+
+                {showAdvancedProduct && (
+                  <div className="p-4 space-y-4 bg-muted/20">
+                    <p className="text-xs text-muted-foreground">
+                      These fields help generate product-specific video mechanics (e.g., how to show tactile feedback, sounds, size).
+                    </p>
+
+                    <div className="grid grid-cols-2 gap-4">
+                      <div className="space-y-2">
+                        <Label htmlFor="product-type">Product Type</Label>
+                        <Input
+                          id="product-type"
+                          placeholder="e.g., mechanical keyboard fidget keychain"
+                          value={productType}
+                          onChange={(e) => setProductType(e.target.value)}
+                        />
+                      </div>
+
+                      <div className="space-y-2">
+                        <Label htmlFor="size-description">Size Description</Label>
+                        <Input
+                          id="size-description"
+                          placeholder="e.g., small palm-sized, handheld"
+                          value={sizeDescription}
+                          onChange={(e) => setSizeDescription(e.target.value)}
+                        />
+                      </div>
+                    </div>
+
+                    <div className="space-y-2">
+                      <Label htmlFor="product-interactions">Interactions</Label>
+                      <Input
+                        id="product-interactions"
+                        placeholder="e.g., pressing keys, clicking switches, fidgeting (comma-separated)"
+                        value={productInteractions}
+                        onChange={(e) => setProductInteractions(e.target.value)}
+                      />
+                      <p className="text-xs text-muted-foreground">How users interact with the product</p>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-4">
+                      <div className="space-y-2">
+                        <Label htmlFor="tactile-features">Tactile Features</Label>
+                        <Input
+                          id="tactile-features"
+                          placeholder="e.g., responsive keys, satisfying click"
+                          value={tactileFeatures}
+                          onChange={(e) => setTactileFeatures(e.target.value)}
+                        />
+                        <p className="text-xs text-muted-foreground">Touch/feel qualities</p>
+                      </div>
+
+                      <div className="space-y-2">
+                        <Label htmlFor="sound-features">Sound Features</Label>
+                        <Input
+                          id="sound-features"
+                          placeholder="e.g., mechanical click sounds"
+                          value={soundFeatures}
+                          onChange={(e) => setSoundFeatures(e.target.value)}
+                        />
+                        <p className="text-xs text-muted-foreground">Audio qualities to emphasize</p>
+                      </div>
+                    </div>
+
+                    <div className="space-y-2">
+                      <Label htmlFor="highlight-feature">Key Feature to Highlight</Label>
+                      <Input
+                        id="highlight-feature"
+                        placeholder="e.g., the clicking/pressing fidget action"
+                        value={highlightFeature}
+                        onChange={(e) => setHighlightFeature(e.target.value)}
+                      />
+                    </div>
+
+                    <div className="space-y-2">
+                      <Label htmlFor="custom-instructions">Custom Instructions</Label>
+                      <Textarea
+                        id="custom-instructions"
+                        placeholder="Any additional instructions for how to showcase the product..."
+                        value={customInstructions}
+                        onChange={(e) => setCustomInstructions(e.target.value)}
+                        rows={2}
+                      />
+                    </div>
+                  </div>
+                )}
               </div>
 
               <div className="flex gap-2">
@@ -1006,6 +1131,15 @@ SCRIPT REFERENCE:
                 setProductAnalysis(null);
                 setSuggestedScript("");
                 setAnalysisError(null);
+                // Reset product context fields
+                setShowAdvancedProduct(false);
+                setProductType("");
+                setProductInteractions("");
+                setTactileFeatures("");
+                setSoundFeatures("");
+                setSizeDescription("");
+                setHighlightFeature("");
+                setCustomInstructions("");
               }}
             >
               Start Over
