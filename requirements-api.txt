@@ -1,0 +1,16 @@
+# FastAPI Backend Requirements
+# Install with: pip install -r requirements-api.txt
+
+# FastAPI and server
+fastapi>=0.104.0
+uvicorn[standard]>=0.24.0
+python-multipart>=0.0.6
+
+# Video downloading
+yt-dlp>=2023.11.16
+
+# Async file operations
+aiofiles>=23.2.1
+
+# Pydantic for data validation (comes with FastAPI but listed for clarity)
+pydantic>=2.0.0

@@ -61,3 +61,7 @@ temp/
 
 # API keys (never commit these)
 secrets.json
+
+# Process ID files
+.backend.pid
+.frontend.pid

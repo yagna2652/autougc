@@ -10,9 +10,12 @@ Enhanced with:
 - Scene-level recreation instructions
 """
 
+import logging
 import os
 import tempfile
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
 
 from dotenv import load_dotenv
 
@@ -101,6 +104,7 @@ class BlueprintGenerator:
         num_frames: int = 5,
         num_frames_for_scenes: int = 20,
         keep_temp_files: bool = False,
+        progress_callback: callable | None = None,
     ) -> VideoBlueprint:
         """
         Generate a complete blueprint from a video file.
@@ -111,6 +115,7 @@ class BlueprintGenerator:
             num_frames: Number of frames for basic visual analysis
             num_frames_for_scenes: Number of frames for scene segmentation (more = better detection)
             keep_temp_files: Whether to keep temporary audio/frame files
+            progress_callback: Optional callback function(step_name: str, step_num: int, total: int)
 
         Returns:
             VideoBlueprint object with complete analysis
@@ -124,47 +129,60 @@ class BlueprintGenerator:
         temp_dir = Path(tempfile.mkdtemp(prefix="autougc_"))
 
         try:
+            total_steps = 11 if self.enable_enhanced_analysis else 6
+
             # Step 1: Get video info
-            print(f"📹 Analyzing video: {video_path.name}")
+            if progress_callback:
+                progress_callback("Getting video info...", 1, total_steps)
+            logger.info("Analyzing video: %s", video_path.name)
             video_info = self.audio_extractor.get_video_info(video_path)
             duration = video_info.get("duration", 30.0)
-            print(f"   Duration: {duration:.1f}s")
+            logger.info("Video duration: %.1fs", duration)
 
             # Step 2: Extract audio
-            print("🎵 Extracting audio...")
+            if progress_callback:
+                progress_callback("Extracting audio...", 2, total_steps)
+            logger.info("Extracting audio...")
             audio_path = self.audio_extractor.extract(
                 video_path=video_path,
                 output_path=temp_dir / "audio.wav",
             )
-            print(f"   Saved to: {audio_path}")
+            logger.debug("Audio saved to: %s", audio_path)
 
             # Step 3: Transcribe audio
-            print("📝 Transcribing audio...")
+            if progress_callback:
+                progress_callback("Transcribing audio...", 3, total_steps)
+            logger.info("Transcribing audio...")
             transcript = self.transcriber.transcribe(audio_path)
-            print(f"   Transcript: {transcript.full_text[:100]}...")
-            print(f"   Segments: {len(transcript.segments)}")
+            logger.debug("Transcript preview: %s...", transcript.full_text[:100])
+            logger.info("Transcript segments: %d", len(transcript.segments))
 
             # Step 4: Extract key frames for basic visual analysis
-            print("🖼️  Extracting frames...")
+            if progress_callback:
+                progress_callback("Extracting frames...", 4, total_steps)
+            logger.info("Extracting frames...")
             frames = self.frame_extractor.extract_key_frames_for_analysis(
                 video_path=video_path,
                 duration=duration,
                 output_dir=temp_dir / "frames",
                 num_frames=num_frames,
             )
-            print(f"   Extracted {len(frames)} frames")
+            logger.info("Extracted %d frames", len(frames))
 
             # Step 5: Analyze visuals
-            print("👁️  Analyzing visuals with Claude Vision...")
+            if progress_callback:
+                progress_callback("Analyzing visuals with Claude Vision...", 5, total_steps)
+            logger.info("Analyzing visuals with Claude Vision...")
             visual_style = self.visual_analyzer.analyze_frames(
                 frames=frames,
                 transcript_summary=transcript.full_text[:200],
             )
-            print(f"   Setting: {visual_style.setting}")
-            print(f"   Framing: {visual_style.framing}")
+            logger.info("Visual style - Setting: %s, Framing: %s", visual_style.setting, visual_style.framing)
 
             # Step 6: Parse structure
-            print("🔍 Parsing video structure...")
+            if progress_callback:
+                progress_callback("Parsing video structure...", 6, total_steps)
+            logger.info("Parsing video structure...")
             visual_context = (
                 f"Setting: {visual_style.setting}, Framing: {visual_style.framing}"
             )
@@ -173,9 +191,10 @@ class BlueprintGenerator:
                 duration=duration,
                 visual_context=visual_context,
             )
-            print(f"   Hook style: {structure.hook.style.value}")
-            print(f"   Body framework: {structure.body.framework.value}")
-            print(f"   CTA urgency: {structure.cta.urgency.value}")
+            logger.info("Structure - Hook: %s, Body: %s, CTA: %s",
+                       structure.hook.style.value,
+                       structure.body.framework.value,
+                       structure.cta.urgency.value)
 
             # Enhanced analysis (if enabled)
             scene_breakdown = None
@@ -185,7 +204,9 @@ class BlueprintGenerator:
 
             if self.enable_enhanced_analysis:
                 # Step 7: Extract more frames for scene analysis
-                print("🎬 Extracting frames for scene analysis...")
+                if progress_callback:
+                    progress_callback("Extracting frames for scene analysis...", 7, total_steps)
+                logger.info("Extracting frames for scene analysis...")
                 scene_frames_dir = temp_dir / "scene_frames"
                 scene_frames = self.frame_extractor.extract_key_frames_for_analysis(
                     video_path=video_path,
@@ -196,10 +217,12 @@ class BlueprintGenerator:
                 # scene_frames is a list of (timestamp, path) tuples
                 frame_timestamps = [f[0] for f in scene_frames]
                 frame_paths = [Path(f[1]) for f in scene_frames]
-                print(f"   Extracted {len(scene_frames)} frames for scene analysis")
+                logger.info("Extracted %d frames for scene analysis", len(scene_frames))
 
                 # Step 8: Scene segmentation
-                print("🎭 Segmenting scenes...")
+                if progress_callback:
+                    progress_callback("Segmenting scenes...", 8, total_steps)
+                logger.info("Segmenting scenes...")
                 transcript_segments = [
                     {"start": seg.start, "end": seg.end, "text": seg.text}
                     for seg in transcript.segments
@@ -210,52 +233,55 @@ class BlueprintGenerator:
                     transcript_segments=transcript_segments,
                     total_duration=duration,
                 )
-                print(f"   Detected {scene_breakdown.total_scenes} scenes")
-                print(f"   Scene types: {scene_breakdown.scene_types_summary}")
-                print(f"   Location changes: {scene_breakdown.location_changes}")
+                logger.info("Detected %d scenes, types: %s, location changes: %d",
+                           scene_breakdown.total_scenes,
+                           scene_breakdown.scene_types_summary,
+                           scene_breakdown.location_changes)
 
                 # Step 9: Pacing analysis
-                print("⏱️  Analyzing pacing...")
+                if progress_callback:
+                    progress_callback("Analyzing pacing...", 9, total_steps)
+                logger.info("Analyzing pacing...")
                 pacing_metrics = self.pacing_analyzer.analyze(
                     transcript_segments=transcript.segments,
                     structure=structure,
                     scene_breakdown=scene_breakdown,
                     total_duration=duration,
                 )
-                print(f"   WPM: {pacing_metrics.words_per_minute}")
-                print(f"   Speaking ratio: {pacing_metrics.speaking_ratio:.1%}")
-                print(f"   Cuts per minute: {pacing_metrics.cuts_per_minute}")
+                logger.info("Pacing - WPM: %.0f, Speaking ratio: %.1f%%, Cuts/min: %.1f",
+                           pacing_metrics.words_per_minute,
+                           pacing_metrics.speaking_ratio * 100,
+                           pacing_metrics.cuts_per_minute)
 
                 # Step 10: Product tracking
-                print("📦 Tracking products...")
+                if progress_callback:
+                    progress_callback("Tracking products...", 10, total_steps)
+                logger.info("Tracking products...")
                 product_tracking = self.product_tracker.track_products(
                     scene_breakdown=scene_breakdown,
                     total_duration=duration,
                 )
                 if product_tracking.primary_product:
-                    print(
-                        f"   Primary product: {product_tracking.primary_product.name}"
-                    )
-                    print(
-                        f"   Screen time: {product_tracking.total_product_screen_time:.1f}s"
-                    )
-                    print(
-                        f"   Product ratio: {product_tracking.product_to_content_ratio:.1%}"
-                    )
+                    logger.info("Product detected - %s, screen time: %.1fs, ratio: %.1f%%",
+                               product_tracking.primary_product.name,
+                               product_tracking.total_product_screen_time,
+                               product_tracking.product_to_content_ratio * 100)
                 else:
-                    print("   No products detected")
+                    logger.info("No products detected")
 
                 # Step 11: Generate scene-level recreation script
-                print("📝 Generating recreation script...")
+                if progress_callback:
+                    progress_callback("Generating recreation script...", 11, total_steps)
+                logger.info("Generating recreation script...")
                 recreation_script = self._generate_recreation_script(
                     scene_breakdown=scene_breakdown,
                     pacing_metrics=pacing_metrics,
                     audio_style=audio_style,
                 )
-                print(f"   Generated {len(recreation_script)} scene instructions")
+                logger.info("Generated %d scene instructions", len(recreation_script))
 
             # Step 12: Build blueprint
-            print("📋 Building blueprint...")
+            logger.info("Building blueprint...")
             blueprint = VideoBlueprint(
                 source_video=str(video_path),
                 transcript=transcript,
@@ -281,9 +307,9 @@ class BlueprintGenerator:
                 output_path = Path(output_path)
                 output_path.parent.mkdir(parents=True, exist_ok=True)
                 blueprint.save(str(output_path))
-                print(f"💾 Blueprint saved to: {output_path}")
+                logger.info("Blueprint saved to: %s", output_path)
 
-            print("✅ Analysis complete!")
+            logger.info("Analysis complete")
             return blueprint
 
         finally:

@@ -67,30 +67,99 @@ export default function Home() {
   const [analysisError, setAnalysisError] = useState<string | null>(null);
   const [uploadedImageUrl, setUploadedImageUrl] = useState<string | null>(null);
   const [useImageToVideo, setUseImageToVideo] = useState(true);
+  const [analysisProgress, setAnalysisProgress] = useState<string>("");
 
   const handleAnalyzeTikTok = async () => {
     if (!tiktokUrl) return;
 
     setIsAnalyzing(true);
+    setAnalysisProgress("Starting analysis...");
+    setAnalysisError(null);
 
-    // Simulated API call - replace with actual backend call
-    await new Promise((resolve) => setTimeout(resolve, 2000));
+    try {
+      // Start analysis job
+      const response = await fetch("/api/analyze-video", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          video_url: tiktokUrl,
+          options: {
+            enhanced: true,
+            whisper_mode: "local",
+            num_frames: 5,
+            scene_frames: 20,
+          },
+        }),
+      });
 
-    // Mock data - replace with actual analysis results
-    setBlueprintData({
-      transcript:
-        "Come along to get some product with us! We stop by our local store to pick up some of our favorite items. These are my favorite! We love this product!",
-      hookStyle: "curiosity_gap",
-      bodyFramework: "demonstration",
-      ctaUrgency: "soft",
-      setting: "Retail store / bedroom",
-      lighting: "Natural daylight mixed with indoor lighting",
-      energy: "high",
-      duration: 20,
-    });
+      if (!response.ok) {
+        const error = await response.json();
+        throw new Error(error.error || "Failed to start analysis");
+      }
 
-    setIsAnalyzing(false);
-    setCurrentStep(2);
+      const { job_id } = await response.json();
+
+      // Poll for status
+      pollJobStatus(job_id);
+    } catch (error) {
+      setIsAnalyzing(false);
+      setAnalysisError(
+        error instanceof Error ? error.message : "Failed to start analysis",
+      );
+    }
+  };
+
+  const pollJobStatus = async (jobId: string) => {
+    const pollInterval = setInterval(async () => {
+      try {
+        const response = await fetch(`/api/analyze-video/${jobId}`);
+
+        if (!response.ok) {
+          throw new Error("Failed to get job status");
+        }
+
+        const data = await response.json();
+
+        // Update progress
+        if (data.progress?.current_step) {
+          setAnalysisProgress(
+            `${data.progress.current_step} (${data.progress.step_number}/${data.progress.total_steps})`,
+          );
+        }
+
+        if (data.status === "completed") {
+          clearInterval(pollInterval);
+
+          // Map blueprint result to state
+          const blueprint = data.result;
+          setBlueprintData({
+            transcript: blueprint.transcript.full_text,
+            hookStyle: blueprint.structure.hook.style,
+            bodyFramework: blueprint.structure.body.framework,
+            ctaUrgency: blueprint.structure.cta.urgency,
+            setting: blueprint.visual_style.setting,
+            lighting: blueprint.visual_style.lighting,
+            energy: blueprint.audio_style.energy,
+            duration: blueprint.total_duration || 20,
+          });
+
+          setIsAnalyzing(false);
+          setAnalysisProgress("");
+          setCurrentStep(2);
+        } else if (data.status === "failed") {
+          clearInterval(pollInterval);
+          setIsAnalyzing(false);
+          setAnalysisProgress("");
+          setAnalysisError(data.error || "Analysis failed");
+        }
+      } catch (error) {
+        console.error("Polling error:", error);
+        clearInterval(pollInterval);
+        setIsAnalyzing(false);
+        setAnalysisProgress("");
+        setAnalysisError("Failed to check analysis status");
+      }
+    }, 3000); // Poll every 3 seconds
   };
 
   const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -277,7 +346,6 @@ SCRIPT REFERENCE:
 
         imageUrl = uploadData.url;
         setUploadedImageUrl(imageUrl);
-        console.log("Product image uploaded:", imageUrl);
       }
 
       setGenerationProgress("Submitting generation request...");
@@ -444,6 +512,43 @@ SCRIPT REFERENCE:
               >
                 {isAnalyzing ? "Analyzing..." : "Analyze TikTok"}
               </Button>
+
+              {/* Progress indicator */}
+              {isAnalyzing && analysisProgress && (
+                <div className="mt-4 rounded-lg border border-border bg-muted/50 p-4">
+                  <div className="flex items-center gap-3">
+                    <div className="h-5 w-5 animate-spin rounded-full border-2 border-primary border-t-transparent" />
+                    <div>
+                      <p className="font-medium">{analysisProgress}</p>
+                      <p className="text-sm text-muted-foreground">
+                        This may take 2-5 minutes depending on video length
+                      </p>
+                    </div>
+                  </div>
+                  <div className="mt-3 w-full bg-gray-200 rounded-full h-2">
+                    <div
+                      className="bg-primary h-2 rounded-full transition-all duration-300"
+                      style={{
+                        width: analysisProgress.includes("/")
+                          ? `${(parseInt(analysisProgress.split("(")[1]?.split("/")[0] || "0") / parseInt(analysisProgress.split("/")[1]?.split(")")[0] || "11")) * 100}%`
+                          : "10%",
+                      }}
+                    />
+                  </div>
+                </div>
+              )}
+
+              {/* Error display */}
+              {analysisError && (
+                <div className="mt-4 rounded-lg border border-destructive bg-destructive/10 p-4">
+                  <p className="font-medium text-destructive">
+                    Analysis Failed
+                  </p>
+                  <p className="text-sm text-destructive/80">
+                    {analysisError}
+                  </p>
+                </div>
+              )}
             </CardContent>
           </Card>
         )}

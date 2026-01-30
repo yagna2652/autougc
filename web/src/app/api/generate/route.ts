@@ -95,19 +95,6 @@ export async function POST(request: NextRequest) {
         ? prompt.trim().substring(0, maxPromptLength) + "..."
         : prompt.trim();
 
-    console.log(`🎬 Starting video generation with ${model}...`);
-    console.log(
-      `   Mode: ${useImageToVideo ? "image-to-video" : "text-to-video"}`,
-    );
-    console.log(`   Endpoint: ${endpoint}`);
-    console.log(`   Duration: ${duration}s`);
-    console.log(`   Aspect Ratio: ${aspectRatio}`);
-    if (useImageToVideo) {
-      console.log(`   Image URL: ${imageUrl.substring(0, 100)}...`);
-    }
-    console.log(`   Prompt length: ${truncatedPrompt.length} chars`);
-    console.log(`   Prompt: ${truncatedPrompt.substring(0, 100)}...`);
-
     // Build arguments based on model and mode
     // Kling uses string duration ("5" or "10"), Sora uses integer (4, 8, or 12)
     const klingDuration: KlingDuration = duration <= 5 ? "5" : "10";
@@ -140,28 +127,17 @@ export async function POST(request: NextRequest) {
     // Submit generation request and wait for result
     const result = await fal.subscribe(endpoint, {
       input,
-      logs: true,
-      onQueueUpdate: (update) => {
-        if (update.status === "IN_PROGRESS" && update.logs) {
-          update.logs.forEach((log) => {
-            console.log(`   [${model}] ${log.message}`);
-          });
-        }
-      },
+      logs: false,
     });
 
     const data = result.data as FalVideoResult;
 
     if (!data?.video?.url) {
-      console.error("❌ No video URL in response:", result);
       return NextResponse.json(
         { error: "Video generation failed - no video URL returned" },
         { status: 500 },
       );
     }
-
-    console.log(`✅ Video generated successfully!`);
-    console.log(`   URL: ${data.video.url}`);
 
     // Return the video URL
     return NextResponse.json({
@@ -174,28 +150,14 @@ export async function POST(request: NextRequest) {
       usedProductImage: useImageToVideo,
     });
   } catch (error) {
-    console.error("❌ Video generation error:", error);
-
     // Extract Fal.ai error details
     let errorDetails: unknown = null;
     let errorMessage = "Unknown error";
 
     if (error && typeof error === "object") {
-      // Log full error for debugging
-      console.error(
-        "Full error object:",
-        JSON.stringify(error, Object.getOwnPropertyNames(error), 2),
-      );
-
-      // Check for Fal.ai specific error body
       if ("body" in error) {
         errorDetails = (error as { body: unknown }).body;
-        console.error(
-          "Fal.ai error body:",
-          JSON.stringify(errorDetails, null, 2),
-        );
       }
-
       if ("message" in error) {
         errorMessage = (error as { message: string }).message;
       }

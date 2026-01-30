@@ -1,0 +1,17 @@
+{
+  "name": "autougc",
+  "version": "1.0.0",
+  "description": "AutoUGC - TikTok-to-UGC video generation pipeline",
+  "private": true,
+  "scripts": {
+    "install": "cd web && npm install",
+    "dev": "cd web && npm run dev:all",
+    "start": "npm run dev",
+    "frontend": "cd web && npm run dev",
+    "backend": "./venv/bin/python -m uvicorn api.server:app --reload --port 8000",
+    "logs": "tail -f fastapi-server.log"
+  },
+  "keywords": ["tiktok", "ugc", "video-generation", "ai"],
+  "author": "",
+  "license": "MIT"
+}

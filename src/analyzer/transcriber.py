@@ -34,6 +34,7 @@ class Transcriber:
         self.mode = mode
         self.api_key = api_key
         self.model = model
+        self._whisper_cmd = "whisper"  # Default, will be set by _verify_local_whisper
 
         if mode == "api" and not api_key:
             raise ValueError("API key is required for API mode")
@@ -43,18 +44,31 @@ class Transcriber:
 
     def _verify_local_whisper(self) -> None:
         """Verify that local Whisper is available."""
+        import sys
+        from pathlib import Path
+
+        # Try to find whisper in venv/bin first
+        venv_whisper = Path(sys.executable).parent / "whisper"
+        if venv_whisper.exists():
+            self._whisper_cmd = str(venv_whisper)
+            return
+
+        # Fall back to checking PATH
         try:
             result = subprocess.run(
                 ["whisper", "--help"],
                 capture_output=True,
                 text=True,
             )
-            if result.returncode != 0:
-                raise RuntimeError("Whisper CLI check failed")
+            if result.returncode == 0:
+                self._whisper_cmd = "whisper"
+                return
         except FileNotFoundError:
-            raise RuntimeError(
-                "Local Whisper not found. Install with: pip install openai-whisper"
-            )
+            pass
+
+        raise RuntimeError(
+            "Local Whisper not found. Install with: pip install openai-whisper"
+        )
 
     def transcribe(
         self,
@@ -91,7 +105,7 @@ class Transcriber:
         with tempfile.TemporaryDirectory() as temp_dir:
             # Build whisper command
             cmd = [
-                "whisper",
+                self._whisper_cmd,
                 str(audio_path),
                 "--model",
                 self.model,

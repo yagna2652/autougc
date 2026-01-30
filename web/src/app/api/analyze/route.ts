@@ -43,8 +43,6 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    console.log(`🔍 Analyzing ${productImages.length} product image(s)...`);
-
     // Build the image content for Claude
     const imageContent: Anthropic.ImageBlockParam[] = productImages.map(
       (base64Image) => {
@@ -173,7 +171,6 @@ Return ONLY valid JSON, no other text.`,
         throw new Error("No JSON found in response");
       }
     } catch {
-      console.error("Failed to parse Claude response:", textContent.text);
       return NextResponse.json(
         {
           error: "Failed to parse analysis response",
@@ -183,8 +180,6 @@ Return ONLY valid JSON, no other text.`,
       );
     }
 
-    console.log("✅ Product analysis complete!");
-
     return NextResponse.json({
       success: true,
       analysis: analysisResult.productAnalysis,
@@ -192,8 +187,6 @@ Return ONLY valid JSON, no other text.`,
       suggestedScript: analysisResult.suggestedScript,
     });
   } catch (error) {
-    console.error("❌ Analysis error:", error);
-
     if (error instanceof Anthropic.APIError) {
       if (error.status === 401) {
         return NextResponse.json(

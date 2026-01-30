@@ -18,19 +18,13 @@ from src.models.blueprint import (
 
 
 class PacingAnalyzer:
-    """
-    Analyzes pacing metrics from transcript and scene data.
-    """
+    """Analyzes pacing metrics from transcript and scene data."""
 
     # Standard pause thresholds (in seconds)
     MICRO_PAUSE = 0.3  # Brief pause for breath
     SHORT_PAUSE = 0.5  # Normal pause between phrases
     MEDIUM_PAUSE = 1.0  # Pause for emphasis
     LONG_PAUSE = 2.0  # Dramatic pause or scene break
-
-    def __init__(self):
-        """Initialize the pacing analyzer."""
-        pass
 
     def analyze(
         self,

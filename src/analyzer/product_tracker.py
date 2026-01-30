@@ -19,13 +19,7 @@ from src.models.blueprint import (
 
 
 class ProductTracker:
-    """
-    Tracks and consolidates product appearances across all scenes.
-    """
-
-    def __init__(self):
-        """Initialize the product tracker."""
-        pass
+    """Tracks and consolidates product appearances across all scenes."""
 
     def track_products(
         self,

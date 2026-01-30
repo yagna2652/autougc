@@ -5,6 +5,7 @@ Analyzes extracted frames to understand visual style, setting, and content.
 """
 
 import base64
+import json
 from pathlib import Path
 
 import anthropic
@@ -175,9 +176,6 @@ Return ONLY the JSON, no additional text.""",
 
         # Parse the response
         response_text = response.content[0].text
-
-        # Extract JSON from response
-        import json
 
         # Try to find JSON in the response
         json_start = response_text.find("{")

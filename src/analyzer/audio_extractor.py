@@ -2,6 +2,7 @@
 Audio extraction from video files using ffmpeg.
 """
 
+import json
 import subprocess
 import tempfile
 from pathlib import Path
@@ -193,8 +194,6 @@ class AudioExtractor:
 
         if result.returncode != 0:
             raise RuntimeError(f"Could not get video info: {result.stderr}")
-
-        import json
 
         data = json.loads(result.stdout)
 
