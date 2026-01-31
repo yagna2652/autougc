@@ -3,16 +3,19 @@ FastAPI server for AutoUGC video analysis backend.
 
 This server exposes the Python BlueprintGenerator to the Next.js web UI,
 allowing the frontend to analyze TikTok videos and get structured blueprints.
+
+Now includes LangGraph-based pipeline routes for proper state management
+and mechanics prompt handling.
 """
 
+import uvicorn
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-import uvicorn
 
 app = FastAPI(
     title="AutoUGC Analyzer API",
     description="Backend API for TikTok video analysis and blueprint generation",
-    version="1.0.0",
+    version="1.1.0",
 )
 
 # CORS configuration for Next.js dev server
@@ -34,7 +37,8 @@ async def health_check():
     return {
         "status": "ok",
         "service": "AutoUGC Analyzer API",
-        "version": "1.0.0",
+        "version": "1.1.0",
+        "langgraph_enabled": True,
     }
 
 
@@ -45,22 +49,29 @@ async def root():
         "service": "AutoUGC Analyzer API",
         "endpoints": {
             "health": "/health",
+            # Legacy endpoints
             "analyze": "POST /api/v1/analyze",
             "job_status": "GET /api/v1/jobs/{job_id}",
             "mechanics_generate": "POST /api/v1/mechanics/generate",
             "mechanics_from_style": "POST /api/v1/mechanics/from-style",
             "mechanics_enhance": "POST /api/v1/mechanics/enhance",
             "mechanics_templates": "GET /api/v1/mechanics/templates",
+            # New LangGraph pipeline endpoints
+            "pipeline_start": "POST /api/v1/pipeline/start",
+            "pipeline_generate_prompt": "POST /api/v1/pipeline/generate-prompt",
+            "pipeline_job_status": "GET /api/v1/pipeline/jobs/{job_id}",
+            "pipeline_job_stream": "GET /api/v1/pipeline/jobs/{job_id}/stream",
+            "pipeline_health": "GET /api/v1/pipeline/health",
         },
     }
 
 
 # Import and include routers
-from api.routes import analyze
-from api.routes import mechanics
+from api.routes import analyze, mechanics, pipeline
 
 app.include_router(analyze.router, prefix="/api/v1", tags=["analysis"])
 app.include_router(mechanics.router, prefix="/api/v1", tags=["mechanics"])
+app.include_router(pipeline.router, prefix="/api/v1", tags=["pipeline"])
 
 
 if __name__ == "__main__":
