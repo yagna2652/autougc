@@ -1,267 +1,118 @@
 """
 Generate Video Node - Calls video generation APIs to create the final video.
 
-This node takes the finalized prompt and calls video generation APIs
-(Sora 2 or Kling via Fal.ai) to generate the actual video.
-
-Supports both:
-- Text-to-video: Generate video purely from prompt
-- Image-to-video: Generate video using a starting frame/product image
+Simple node that takes a video prompt and generates a video using Fal.ai
+(Sora or Kling models).
 """
 
 import logging
 import os
 from typing import Any
 
-from src.pipeline.state import (
-    PipelineState,
-    PipelineStep,
-    mark_completed,
-    mark_failed,
-    update_progress,
-)
-
 logger = logging.getLogger(__name__)
 
 # Model endpoints on Fal.ai
 MODEL_ENDPOINTS = {
-    # Text-to-video endpoints
-    "sora2": "fal-ai/sora-2/text-to-video",
-    "sora2pro": "fal-ai/sora-2/text-to-video/pro",
+    "sora": "fal-ai/sora-2/text-to-video",
     "kling": "fal-ai/kling-video/v2.5-turbo/pro/text-to-video",
-    # Image-to-video endpoints
-    "sora2_i2v": "fal-ai/sora-2/image-to-video",
-    "sora2pro_i2v": "fal-ai/sora-2/image-to-video/pro",
-    "kling_i2v": "fal-ai/kling-video/v2.5-turbo/pro/image-to-video",
 }
 
 
-def generate_video_node(state: PipelineState) -> dict[str, Any]:
+def generate_video_node(state: dict[str, Any]) -> dict[str, Any]:
     """
-    Generate video using Fal.ai API (Sora 2 or Kling).
-
-    This node:
-    1. Takes the final_prompt from previous nodes
-    2. Optionally uses a starting frame for image-to-video
-    3. Calls the appropriate video generation API
-    4. Returns the generated video URL
+    Generate video using Fal.ai API (Sora or Kling).
 
     Args:
-        state: Current pipeline state with final_prompt
+        state: Pipeline state with 'video_prompt'
 
     Returns:
-        Partial state update with generated_video_url and completion status
+        State update with 'generated_video_url' or 'error'
     """
-    final_prompt = state.get("final_prompt", "")
+    video_prompt = state.get("video_prompt", "")
 
-    if not final_prompt:
-        return mark_failed(state, "No prompt available for video generation")
+    if not video_prompt:
+        return {
+            "error": "No video prompt available for generation",
+            "current_step": "generation_failed",
+        }
 
     logger.info("Starting video generation")
 
+    # Check for FAL_KEY
+    fal_key = os.getenv("FAL_KEY")
+    if not fal_key:
+        return {
+            "error": "FAL_KEY not set - cannot generate video",
+            "current_step": "generation_failed",
+        }
+
+    # Get config
+    config = state.get("config", {})
+    video_model = config.get("video_model", "kling")
+    video_duration = config.get("video_duration", 5)
+    aspect_ratio = config.get("aspect_ratio", "9:16")
+
+    # Get endpoint
+    endpoint = MODEL_ENDPOINTS.get(video_model, MODEL_ENDPOINTS["kling"])
+
+    logger.info(f"Using model: {video_model} ({endpoint})")
+    logger.info(f"Prompt: {video_prompt[:100]}...")
+
     try:
-        # Update progress
-        progress_update = update_progress(state, PipelineStep.GENERATING_VIDEO, 11)
-
-        # Get config
-        config = state.get("config", {})
-        video_model = config.get("video_model", "sora2")
-        video_duration = config.get("video_duration", 5)
-        aspect_ratio = config.get("aspect_ratio", "9:16")
-        use_image_to_video = config.get("use_image_to_video", True)
-
-        # Check for FAL_KEY
-        fal_key = os.getenv("FAL_KEY")
-        if not fal_key:
-            return {
-                **progress_update,
-                **mark_failed(
-                    state,
-                    "FAL_KEY not set",
-                    {"hint": "Set FAL_KEY environment variable for video generation"},
-                ),
-            }
-
-        # Determine if we should use image-to-video
-        starting_frame_url = state.get("starting_frame_url", "")
-        uploaded_image_url = state.get("uploaded_image_url", "")
-        product_images = state.get("product_images", [])
-
-        # Priority for image source: starting_frame > uploaded_image > first product image
-        image_url = ""
-        if use_image_to_video:
-            if starting_frame_url:
-                image_url = starting_frame_url
-                logger.info("Using starting frame for image-to-video")
-            elif uploaded_image_url:
-                image_url = uploaded_image_url
-                logger.info("Using uploaded image for image-to-video")
-            elif product_images:
-                # Need to upload product image first
-                image_url = _upload_image_to_fal(product_images[0], fal_key)
-                if image_url:
-                    logger.info("Uploaded product image for image-to-video")
-
-        # Select endpoint based on mode
-        use_i2v = bool(image_url) and use_image_to_video
-        endpoint = _select_endpoint(video_model, use_i2v)
-
-        if not endpoint:
-            return {
-                **progress_update,
-                **mark_failed(
-                    state,
-                    f"Unknown video model: {video_model}",
-                    {"valid_models": list(MODEL_ENDPOINTS.keys())},
-                ),
-            }
-
-        # Truncate prompt if too long
-        max_prompt_length = 1500
-        truncated_prompt = (
-            final_prompt[:max_prompt_length] + "..."
-            if len(final_prompt) > max_prompt_length
-            else final_prompt
-        )
-
-        # Build API input
-        api_input = _build_api_input(
-            model=video_model,
-            prompt=truncated_prompt,
+        # Call Fal.ai API
+        result = _call_fal_api(
+            fal_key=fal_key,
+            endpoint=endpoint,
+            prompt=video_prompt,
             duration=video_duration,
             aspect_ratio=aspect_ratio,
-            image_url=image_url if use_i2v else None,
         )
-
-        # Call Fal.ai API
-        result = _call_fal_api(endpoint, api_input, fal_key)
 
         if not result:
             return {
-                **progress_update,
-                **mark_failed(state, "Video generation API returned no result"),
+                "error": "Video generation failed - no result returned",
+                "current_step": "generation_failed",
             }
 
-        video_url = result.get("video_url", "")
+        video_url = result.get("video", {}).get("url", "")
 
         if not video_url:
             return {
-                **progress_update,
-                **mark_failed(
-                    state,
-                    "Video generation completed but no video URL returned",
-                    {"api_response": result},
-                ),
+                "error": "Video generation succeeded but no URL returned",
+                "current_step": "generation_failed",
             }
 
-        logger.info(f"Video generated successfully: {video_url}")
-
-        # Build video metadata
-        video_metadata = {
-            "model": video_model,
-            "endpoint": endpoint,
-            "duration": video_duration,
-            "aspect_ratio": aspect_ratio,
-            "mode": "image-to-video" if use_i2v else "text-to-video",
-            "prompt_length": len(truncated_prompt),
-            "used_starting_frame": bool(starting_frame_url),
-            "used_product_image": bool(image_url) and not starting_frame_url,
-        }
-
-        # Mark pipeline as completed
-        completion_update = mark_completed(state)
+        logger.info(f"Video generated: {video_url}")
 
         return {
-            **progress_update,
-            **completion_update,
             "generated_video_url": video_url,
-            "video_metadata": video_metadata,
+            "current_step": "video_generated",
         }
 
     except Exception as e:
-        logger.exception("Unexpected error during video generation")
-        return mark_failed(
-            state,
-            f"Video generation failed: {str(e)}",
-            {"exception_type": type(e).__name__},
-        )
-
-
-def _select_endpoint(model: str, use_i2v: bool) -> str | None:
-    """
-    Select the appropriate Fal.ai endpoint.
-
-    Args:
-        model: Model name (sora2, sora2pro, kling)
-        use_i2v: Whether to use image-to-video
-
-    Returns:
-        Endpoint string or None if invalid model
-    """
-    if use_i2v:
-        endpoint_key = f"{model}_i2v"
-    else:
-        endpoint_key = model
-
-    return MODEL_ENDPOINTS.get(endpoint_key)
-
-
-def _build_api_input(
-    model: str,
-    prompt: str,
-    duration: int,
-    aspect_ratio: str,
-    image_url: str | None,
-) -> dict[str, Any]:
-    """
-    Build the API input for Fal.ai.
-
-    Args:
-        model: Model name
-        prompt: Video generation prompt
-        duration: Duration in seconds
-        aspect_ratio: Aspect ratio (9:16, 16:9)
-        image_url: Optional image URL for i2v mode
-
-    Returns:
-        API input dictionary
-    """
-    # Kling uses string duration, Sora uses integer
-    if model == "kling":
-        kling_duration = "5" if duration <= 5 else "10"
-        api_input = {
-            "prompt": prompt,
-            "aspect_ratio": aspect_ratio,
-            "duration": kling_duration,
+        logger.exception("Error generating video")
+        return {
+            "error": f"Video generation failed: {str(e)}",
+            "current_step": "generation_failed",
         }
-    else:
-        # Sora 2 / Sora 2 Pro
-        sora_duration = 4 if duration <= 4 else (8 if duration <= 8 else 12)
-        api_input = {
-            "prompt": prompt,
-            "aspect_ratio": aspect_ratio,
-            "duration": sora_duration,
-        }
-
-    # Add image URL if using image-to-video
-    if image_url:
-        api_input["image_url"] = image_url
-
-    return api_input
 
 
 def _call_fal_api(
-    endpoint: str,
-    api_input: dict[str, Any],
     fal_key: str,
+    endpoint: str,
+    prompt: str,
+    duration: int,
+    aspect_ratio: str,
 ) -> dict[str, Any] | None:
     """
-    Call Fal.ai API for video generation.
+    Call Fal.ai API to generate video.
 
     Args:
-        endpoint: Fal.ai endpoint
-        api_input: API input parameters
         fal_key: Fal.ai API key
+        endpoint: API endpoint
+        prompt: Video generation prompt
+        duration: Video duration in seconds
+        aspect_ratio: Aspect ratio (e.g., "9:16")
 
     Returns:
         API result or None on failure
@@ -272,127 +123,35 @@ def _call_fal_api(
         # Configure client
         client = FalClient(key=fal_key)
 
-        logger.info(f"Submitting to Fal.ai endpoint: {endpoint}")
-        logger.debug(f"API input: {api_input}")
+        logger.info(f"Calling Fal.ai: {endpoint}")
 
-        # Submit and wait for result
-        # Using subscribe for synchronous wait
+        # Build API input based on model
+        if "kling" in endpoint:
+            api_input = {
+                "prompt": prompt,
+                "duration": str(duration),
+                "aspect_ratio": aspect_ratio,
+            }
+        else:
+            # Sora format
+            api_input = {
+                "prompt": prompt,
+                "duration": duration,
+                "aspect_ratio": aspect_ratio,
+            }
+
+        # Call API and wait for result
         result = client.subscribe(
             endpoint,
             arguments=api_input,
-            with_logs=False,
+            with_logs=True,
         )
-
-        if result and hasattr(result, "video"):
-            return {"video_url": result.video.url}
-        elif result and isinstance(result, dict):
-            video = result.get("video", {})
-            if isinstance(video, dict):
-                return {"video_url": video.get("url", "")}
-            elif hasattr(video, "url"):
-                return {"video_url": video.url}
 
         return result
 
     except ImportError:
-        # Try alternative import
-        try:
-            import fal
-
-            fal.config({"credentials": fal_key})
-
-            logger.info(f"Submitting to Fal.ai endpoint: {endpoint}")
-
-            result = fal.subscribe(
-                endpoint,
-                input=api_input,
-                logs=False,
-            )
-
-            if result and result.data:
-                data = result.data
-                if hasattr(data, "video"):
-                    return {"video_url": data.video.url}
-                elif isinstance(data, dict) and "video" in data:
-                    video = data["video"]
-                    return {
-                        "video_url": video.get("url", "")
-                        if isinstance(video, dict)
-                        else video.url
-                    }
-
-            return None
-
-        except ImportError:
-            logger.error("Neither fal_client nor fal package available")
-            return None
-
+        logger.error("fal_client not installed. Run: pip install fal-client")
+        return None
     except Exception as e:
         logger.error(f"Fal.ai API error: {e}")
-        return None
-
-
-def _upload_image_to_fal(
-    image_data: str,
-    fal_key: str,
-) -> str | None:
-    """
-    Upload an image to Fal.ai for use in image-to-video.
-
-    Args:
-        image_data: Base64-encoded image data
-        fal_key: Fal.ai API key
-
-    Returns:
-        Uploaded image URL or None on failure
-    """
-    try:
-        import base64
-        import tempfile
-        from pathlib import Path
-
-        # If it's already a URL, return it
-        if image_data.startswith("http"):
-            return image_data
-
-        # Extract base64 data
-        if image_data.startswith("data:"):
-            parts = image_data.split(";base64,")
-            if len(parts) == 2:
-                image_bytes = base64.b64decode(parts[1])
-            else:
-                return None
-        else:
-            image_bytes = base64.b64decode(image_data)
-
-        # Save to temp file and upload
-        with tempfile.NamedTemporaryFile(suffix=".jpg", delete=False) as tmp:
-            tmp.write(image_bytes)
-            tmp_path = tmp.name
-
-        try:
-            from fal_client import FalClient
-
-            client = FalClient(key=fal_key)
-            url = client.upload_file(tmp_path)
-            return url
-
-        except ImportError:
-            try:
-                import fal
-
-                fal.config({"credentials": fal_key})
-                url = fal.upload_file(tmp_path)
-                return url
-
-            except ImportError:
-                logger.error("Cannot upload image: fal package not available")
-                return None
-
-        finally:
-            # Clean up temp file
-            Path(tmp_path).unlink(missing_ok=True)
-
-    except Exception as e:
-        logger.error(f"Failed to upload image: {e}")
         return None
