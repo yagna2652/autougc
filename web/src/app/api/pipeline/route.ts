@@ -1,7 +1,5 @@
 /**
- * Pipeline API Route - Proxies requests to the Python UGC pipeline backend.
- *
- * Simple API that forwards requests to the Python FastAPI backend.
+ * Pipeline API Route - Simple proxy to Python backend.
  *
  * Endpoints:
  * - POST /api/pipeline (action: "start") - Start pipeline job
@@ -12,18 +10,11 @@ import { NextRequest, NextResponse } from "next/server";
 
 const PYTHON_API_URL = process.env.PYTHON_API_URL || "http://localhost:8000";
 
-interface PipelineStartRequest {
+interface StartRequest {
   action: "start";
   videoUrl: string;
   productDescription?: string;
   productImages?: string[];
-  config?: {
-    claudeModel?: string;
-    numFrames?: number;
-    videoModel?: string;
-    videoDuration?: number;
-    aspectRatio?: string;
-  };
 }
 
 interface StatusRequest {
@@ -31,29 +22,7 @@ interface StatusRequest {
   jobId: string;
 }
 
-type PipelineRequest = PipelineStartRequest | StatusRequest;
-
-/**
- * Convert camelCase to snake_case for Python API
- */
-function toSnakeCase(obj: Record<string, unknown>): Record<string, unknown> {
-  const result: Record<string, unknown> = {};
-
-  for (const [key, value] of Object.entries(obj)) {
-    const snakeKey = key.replace(
-      /[A-Z]/g,
-      (letter) => `_${letter.toLowerCase()}`,
-    );
-
-    if (value && typeof value === "object" && !Array.isArray(value)) {
-      result[snakeKey] = toSnakeCase(value as Record<string, unknown>);
-    } else {
-      result[snakeKey] = value;
-    }
-  }
-
-  return result;
-}
+type PipelineRequest = StartRequest | StatusRequest;
 
 export async function POST(request: NextRequest) {
   try {
@@ -61,9 +30,9 @@ export async function POST(request: NextRequest) {
 
     switch (body.action) {
       case "start":
-        return handleStartPipeline(body);
+        return handleStart(body);
       case "status":
-        return handleGetStatus(body);
+        return handleStatus(body);
       default:
         return NextResponse.json(
           { error: "Invalid action. Use 'start' or 'status'" },
@@ -79,17 +48,14 @@ export async function POST(request: NextRequest) {
   }
 }
 
-async function handleStartPipeline(body: PipelineStartRequest) {
+async function handleStart(body: StartRequest) {
   const requestBody = {
     video_url: body.videoUrl,
     product_description: body.productDescription || "",
     product_images: body.productImages || [],
-    config: body.config
-      ? toSnakeCase(body.config as Record<string, unknown>)
-      : null,
   };
 
-  console.log("Starting pipeline with:", JSON.stringify(requestBody, null, 2));
+  console.log("Starting pipeline:", requestBody.video_url);
 
   const response = await fetch(`${PYTHON_API_URL}/api/v1/pipeline/start`, {
     method: "POST",
@@ -115,7 +81,7 @@ async function handleStartPipeline(body: PipelineStartRequest) {
   });
 }
 
-async function handleGetStatus(body: StatusRequest) {
+async function handleStatus(body: StatusRequest) {
   const response = await fetch(
     `${PYTHON_API_URL}/api/v1/pipeline/jobs/${body.jobId}`,
     { method: "GET" },
@@ -130,44 +96,32 @@ async function handleGetStatus(body: StatusRequest) {
     );
   }
 
-  // Return simplified response matching new backend
   return NextResponse.json({
     success: true,
     jobId: data.job_id,
     status: data.status,
-    currentStep: data.current_step,
+    currentStep: data.current_step || "",
     error: data.error || null,
-    // Analysis results
     videoAnalysis: data.video_analysis || null,
-    // Prompt results
     videoPrompt: data.video_prompt || "",
     suggestedScript: data.suggested_script || "",
-    // Video output
     generatedVideoUrl: data.generated_video_url || "",
-    // Metadata
-    createdAt: data.created_at,
-    updatedAt: data.updated_at,
   });
 }
 
-// GET endpoint for health check
 export async function GET() {
   try {
-    const response = await fetch(`${PYTHON_API_URL}/api/v1/pipeline/health`, {
-      method: "GET",
-    });
-
+    const response = await fetch(`${PYTHON_API_URL}/api/v1/pipeline/health`);
     const data = await response.json();
 
     return NextResponse.json({
       status: "ok",
-      pythonBackend: data,
+      backend: data,
     });
-  } catch (error) {
+  } catch {
     return NextResponse.json({
       status: "error",
-      error: "Python backend not reachable",
-      hint: "Make sure the Python API server is running on localhost:8000",
+      error: "Backend not reachable",
     });
   }
 }

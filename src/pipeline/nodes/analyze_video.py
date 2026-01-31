@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Any
 
 import anthropic
+import httpx
 
 from src.tracing import TracedAnthropicClient, is_tracing_enabled
 
@@ -62,14 +63,33 @@ def analyze_video_node(state: dict[str, Any]) -> dict[str, Any]:
 
     try:
         # Build the message content with frames
+        logger.info("Building analysis content from frames...")
         content = _build_analysis_content(frames)
 
-        # Call Claude Vision
-        response = client.messages.create(
+        if not content:
+            logger.error("Failed to build content - no valid frames")
+            return {
+                "video_analysis": {},
+                "error": "Failed to encode any frames for analysis",
+                "current_step": "analysis_failed",
+            }
+
+        logger.info(
+            f"Content built with {len(content)} items, calling Claude Vision..."
+        )
+
+        # Call Claude Vision with timeout
+        # Use a fresh client with timeout for this call
+        http_client = httpx.Client(timeout=httpx.Timeout(120.0, connect=30.0))
+        api_client = anthropic.Anthropic(api_key=api_key, http_client=http_client)
+
+        response = api_client.messages.create(
             model=model,
             max_tokens=2000,
             messages=[{"role": "user", "content": content}],
         )
+
+        logger.info("Claude Vision response received")
 
         # Parse response
         response_text = response.content[0].text
@@ -205,8 +225,10 @@ Return ONLY valid JSON."""
         )
 
         # Add the image
+        logger.debug(f"Encoding frame: {frame_path}")
         image_data, media_type = _encode_image(frame_path)
         if image_data:
+            logger.debug(f"Frame encoded successfully: {len(image_data)} bytes")
             content.append(
                 {
                     "type": "image",
@@ -217,7 +239,18 @@ Return ONLY valid JSON."""
                     },
                 }
             )
+        else:
+            logger.warning(f"Failed to encode frame: {frame_path}")
 
+    # Check if we got at least one image
+    has_images = any(item.get("type") == "image" for item in content)
+    if not has_images:
+        logger.error("No frames could be encoded!")
+        return []
+
+    logger.info(
+        f"Successfully built content with {len([c for c in content if c.get('type') == 'image'])} images"
+    )
     return content
 
 
@@ -247,6 +280,16 @@ def _encode_image(image_path: str) -> tuple[str, str]:
         }
         media_type = media_types.get(suffix, "image/jpeg")
 
+        # Check file size first
+        file_size = path.stat().st_size
+        logger.debug(f"Image file size: {file_size} bytes")
+
+        # Warn if file is very large (> 5MB)
+        if file_size > 5 * 1024 * 1024:
+            logger.warning(
+                f"Large image file ({file_size / 1024 / 1024:.1f}MB): {image_path}"
+            )
+
         # Read and encode
         with open(path, "rb") as f:
             data = base64.standard_b64encode(f.read()).decode("utf-8")
@@ -254,7 +297,7 @@ def _encode_image(image_path: str) -> tuple[str, str]:
         return data, media_type
 
     except Exception as e:
-        logger.warning(f"Failed to encode image {image_path}: {e}")
+        logger.error(f"Failed to encode image {image_path}: {e}")
         return None, None
 
 

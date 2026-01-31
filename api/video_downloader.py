@@ -4,10 +4,11 @@ Video downloader for TikTok URLs using yt-dlp.
 Downloads TikTok videos to a temporary directory for analysis.
 """
 
-import yt_dlp
-from pathlib import Path
 import tempfile
+from pathlib import Path
 from typing import Optional
+
+import yt_dlp
 
 
 class VideoDownloader:
@@ -20,7 +21,9 @@ class VideoDownloader:
         Args:
             output_dir: Directory to save videos. If None, uses system temp directory.
         """
-        self.output_dir = output_dir or Path(tempfile.gettempdir()) / "autougc_downloads"
+        self.output_dir = (
+            output_dir or Path(tempfile.gettempdir()) / "autougc_downloads"
+        )
         self.output_dir.mkdir(parents=True, exist_ok=True)
 
     def download(self, url: str) -> Path:
@@ -37,10 +40,10 @@ class VideoDownloader:
             Exception: If download fails
         """
         ydl_opts = {
-            'format': 'best',
-            'outtmpl': str(self.output_dir / '%(id)s.%(ext)s'),
-            'quiet': False,
-            'no_warnings': False,
+            "format": "best",
+            "outtmpl": str(self.output_dir / "%(id)s.%(ext)s"),
+            "quiet": False,
+            "no_warnings": False,
         }
 
         try:
@@ -53,7 +56,9 @@ class VideoDownloader:
                 video_path = Path(filename)
 
                 if not video_path.exists():
-                    raise FileNotFoundError(f"Downloaded video not found at {video_path}")
+                    raise FileNotFoundError(
+                        f"Downloaded video not found at {video_path}"
+                    )
 
                 return video_path
 
@@ -77,3 +82,27 @@ class VideoDownloader:
             return False
         except Exception:
             return False
+
+
+def download_video(url: str) -> dict:
+    """
+    Convenience function to download a video from URL.
+
+    Args:
+        url: Video URL (TikTok, Instagram Reel, etc.)
+
+    Returns:
+        Dict with 'success', 'path', and optionally 'error' keys
+    """
+    try:
+        downloader = VideoDownloader()
+        video_path = downloader.download(url)
+        return {
+            "success": True,
+            "path": str(video_path),
+        }
+    except Exception as e:
+        return {
+            "success": False,
+            "error": str(e),
+        }

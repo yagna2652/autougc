@@ -118,10 +118,10 @@ def _call_fal_api(
         API result or None on failure
     """
     try:
-        from fal_client import FalClient
+        import fal_client
 
-        # Configure client
-        client = FalClient(key=fal_key)
+        # Set the API key in environment (fal_client reads from FAL_KEY)
+        os.environ["FAL_KEY"] = fal_key
 
         logger.info(f"Calling Fal.ai: {endpoint}")
 
@@ -141,7 +141,7 @@ def _call_fal_api(
             }
 
         # Call API and wait for result
-        result = client.subscribe(
+        result = fal_client.subscribe(
             endpoint,
             arguments=api_input,
             with_logs=True,

@@ -21,6 +21,79 @@ class FrameExtractor:
         """
         self.ffmpeg_path = ffmpeg_path
 
+    def extract(
+        self,
+        video_path: str | Path,
+        num_frames: int = 5,
+        output_dir: str | Path | None = None,
+    ) -> list[Path]:
+        """
+        Convenience method to extract key frames from a video.
+
+        Automatically gets video duration and extracts frames at strategic points.
+
+        Args:
+            video_path: Path to the input video file
+            num_frames: Number of frames to extract (default 5)
+            output_dir: Directory to save frames (creates temp dir if not provided)
+
+        Returns:
+            List of paths to extracted frame images
+        """
+        video_path = Path(video_path)
+
+        if not video_path.exists():
+            raise FileNotFoundError(f"Video file not found: {video_path}")
+
+        # Get video duration using ffprobe
+        duration = self._get_video_duration(video_path)
+
+        # Extract key frames for analysis
+        results = self.extract_key_frames_for_analysis(
+            video_path=video_path,
+            duration=duration,
+            output_dir=output_dir,
+            num_frames=num_frames,
+        )
+
+        # Return just the paths (not timestamps)
+        return [path for _, path in results]
+
+    def _get_video_duration(self, video_path: Path) -> float:
+        """
+        Get video duration in seconds using ffprobe.
+
+        Args:
+            video_path: Path to the video file
+
+        Returns:
+            Duration in seconds
+        """
+        cmd = [
+            "ffprobe",
+            "-v",
+            "error",
+            "-show_entries",
+            "format=duration",
+            "-of",
+            "default=noprint_wrappers=1:nokey=1",
+            str(video_path),
+        ]
+
+        result = subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+        )
+
+        if result.returncode != 0:
+            raise RuntimeError(f"ffprobe failed to get duration:\n{result.stderr}")
+
+        try:
+            return float(result.stdout.strip())
+        except ValueError:
+            raise RuntimeError(f"Could not parse duration: {result.stdout}")
+
     def extract_frames(
         self,
         video_path: str | Path,

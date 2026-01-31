@@ -15,16 +15,29 @@ def download_video_node(state: dict[str, Any]) -> dict[str, Any]:
     Download video from URL for local processing.
 
     Args:
-        state: Pipeline state with 'video_url'
+        state: Pipeline state with 'video_url' or 'video_path'
 
     Returns:
         State update with 'video_path' or 'error'
     """
+    # Check if video_path already exists (prefer local file over downloading)
+    existing_path = state.get("video_path", "")
+    if existing_path:
+        import os
+
+        if os.path.exists(existing_path):
+            logger.info(f"Using existing video path: {existing_path}")
+            return {
+                "current_step": "video_downloaded",
+            }
+        else:
+            logger.warning(f"Provided video_path does not exist: {existing_path}")
+
     video_url = state.get("video_url", "")
 
     if not video_url:
         return {
-            "error": "No video URL provided",
+            "error": "No video URL provided and no valid video_path exists",
             "current_step": "download_failed",
         }
 
