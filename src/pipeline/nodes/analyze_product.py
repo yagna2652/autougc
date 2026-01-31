@@ -5,6 +5,8 @@ This node uses Claude Vision API to analyze product images and understand:
 - Product type and category
 - Key features and characteristics
 - Best ways to showcase the product in a UGC video
+
+All LLM calls are traced via LangSmith for full prompt observability.
 """
 
 import logging
@@ -18,6 +20,7 @@ from src.pipeline.state import (
     mark_failed,
     update_progress,
 )
+from src.tracing import TracedAnthropicClient, is_tracing_enabled
 
 logger = logging.getLogger(__name__)
 
@@ -73,8 +76,13 @@ def analyze_product_node(state: PipelineState) -> dict[str, Any]:
                 ),
             }
 
-        # Initialize Anthropic client
-        client = anthropic.Anthropic(api_key=api_key)
+        # Initialize Anthropic client (with tracing if enabled)
+        if is_tracing_enabled():
+            client = TracedAnthropicClient(
+                api_key=api_key, trace_name="analyze_product"
+            )
+        else:
+            client = anthropic.Anthropic(api_key=api_key)
 
         # Build image content for Claude
         image_content = _build_image_content(product_images)

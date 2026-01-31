@@ -4,6 +4,8 @@ Generate Base Prompt Node - Creates video generation prompts using Claude.
 This node uses Claude to generate detailed video prompts that will create
 realistic UGC-style TikTok videos when sent to video generation models like
 Sora 2 or Kling.
+
+All LLM calls are traced via LangSmith for full prompt observability.
 """
 
 import logging
@@ -16,6 +18,7 @@ from src.pipeline.state import (
     mark_failed,
     update_progress,
 )
+from src.tracing import TracedAnthropicClient, is_tracing_enabled
 
 logger = logging.getLogger(__name__)
 
@@ -152,7 +155,12 @@ def _generate_prompt_with_vision(
     """
     import anthropic
 
-    client = anthropic.Anthropic(api_key=api_key)
+    if is_tracing_enabled():
+        client = TracedAnthropicClient(
+            api_key=api_key, trace_name="generate_base_prompt_vision"
+        )
+    else:
+        client = anthropic.Anthropic(api_key=api_key)
 
     # Build image content
     image_content = _build_image_content(product_images[:3])
@@ -218,7 +226,12 @@ def _generate_prompt_text_only(
     """
     import anthropic
 
-    client = anthropic.Anthropic(api_key=api_key)
+    if is_tracing_enabled():
+        client = TracedAnthropicClient(
+            api_key=api_key, trace_name="generate_base_prompt_text"
+        )
+    else:
+        client = anthropic.Anthropic(api_key=api_key)
 
     # Build the prompt
     prompt_text = _build_text_only_prompt(

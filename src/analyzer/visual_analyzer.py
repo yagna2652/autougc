@@ -2,6 +2,7 @@
 Visual analysis of video frames using Claude Vision API.
 
 Analyzes extracted frames to understand visual style, setting, and content.
+All LLM calls are traced via LangSmith for full prompt observability.
 """
 
 import base64
@@ -15,6 +16,7 @@ from src.models.blueprint import (
     TextOverlay,
     VisualStyle,
 )
+from src.tracing import TracedAnthropicClient, is_tracing_enabled
 
 
 class VisualAnalyzer:
@@ -28,7 +30,13 @@ class VisualAnalyzer:
             api_key: Anthropic API key
             model: Claude model to use (must support vision)
         """
-        self.client = anthropic.Anthropic(api_key=api_key)
+        # Use traced client for LangSmith observability
+        if is_tracing_enabled():
+            self.client = TracedAnthropicClient(
+                api_key=api_key, trace_name="visual_analyzer"
+            )
+        else:
+            self.client = anthropic.Anthropic(api_key=api_key)
         self.model = model
 
     def _encode_image(self, image_path: Path) -> tuple[str, str]:

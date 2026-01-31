@@ -2,6 +2,7 @@
 Structure parser for identifying Hook/Body/CTA sections in video transcripts.
 
 Uses Claude API to analyze transcript and identify video structure.
+All LLM calls are traced via LangSmith for full prompt observability.
 """
 
 import json
@@ -20,6 +21,7 @@ from src.models.blueprint import (
     Transcript,
     VideoStructure,
 )
+from src.tracing import TracedAnthropicClient, is_tracing_enabled
 
 
 class StructureParser:
@@ -37,7 +39,13 @@ class StructureParser:
             api_key: Anthropic API key
             model: Claude model to use
         """
-        self.client = anthropic.Anthropic(api_key=api_key)
+        # Use traced client for LangSmith observability
+        if is_tracing_enabled():
+            self.client = TracedAnthropicClient(
+                api_key=api_key, trace_name="structure_parser"
+            )
+        else:
+            self.client = anthropic.Anthropic(api_key=api_key)
         self.model = model
 
     def parse_structure(

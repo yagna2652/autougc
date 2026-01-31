@@ -7,6 +7,8 @@ Uses visual analysis to:
 3. Identify shot types
 4. Track location changes
 5. Extract per-scene actions and expressions
+
+All LLM calls are traced via LangSmith for full prompt observability.
 """
 
 import base64
@@ -27,6 +29,7 @@ from src.models.blueprint import (
     ShotType,
     TransitionType,
 )
+from src.tracing import TracedAnthropicClient, is_tracing_enabled
 
 
 class SceneSegmenter:
@@ -45,7 +48,13 @@ class SceneSegmenter:
             anthropic_api_key: API key for Anthropic
             model: Claude model to use for analysis
         """
-        self.client = anthropic.Anthropic(api_key=anthropic_api_key)
+        # Use traced client for LangSmith observability
+        if is_tracing_enabled():
+            self.client = TracedAnthropicClient(
+                api_key=anthropic_api_key, trace_name="scene_segmenter"
+            )
+        else:
+            self.client = anthropic.Anthropic(api_key=anthropic_api_key)
         self.model = model
 
     def segment_video(
