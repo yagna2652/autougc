@@ -7,6 +7,10 @@ Simple API that exposes the UGC generation pipeline:
 - GET /api/v1/pipeline/health - Health check
 """
 
+from dotenv import load_dotenv
+
+load_dotenv()  # Load environment variables from .env
+
 import uvicorn
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
