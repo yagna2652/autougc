@@ -45,7 +45,7 @@ def generate_blueprint_node(state: PipelineState) -> dict[str, Any]:
     """
     from src.analyzer.structure_parser import StructureParser
     from src.models.blueprint import Transcript as TranscriptModel
-    from src.models.blueprint import VideoBlueprint, VisualStyle
+    from src.models.blueprint import VideoBlueprint
 
     # Get required data from state
     transcript_data = state.get("transcript", {})
@@ -295,7 +295,7 @@ def _run_enhanced_analysis(
         # Scene segmentation
         from src.analyzer.scene_segmenter import SceneSegmenter
 
-        segmenter = SceneSegmenter(
+        SceneSegmenter(
             anthropic_api_key=api_key,
             model=claude_model,
         )
@@ -312,7 +312,7 @@ def _run_enhanced_analysis(
         # Pacing analysis
         from src.analyzer.pacing_analyzer import PacingAnalyzer
 
-        pacing_analyzer = PacingAnalyzer()
+        PacingAnalyzer()
         # Implementation depends on your existing code
         logger.info("Running pacing analysis...")
 
@@ -325,7 +325,7 @@ def _run_enhanced_analysis(
         # Product tracking
         from src.analyzer.product_tracker import ProductTracker
 
-        tracker = ProductTracker()
+        ProductTracker()
         # Implementation depends on your existing code
         logger.info("Running product tracking...")
 

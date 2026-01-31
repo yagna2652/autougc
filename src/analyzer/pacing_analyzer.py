@@ -271,7 +271,7 @@ class PacingAnalyzer:
         for segment in segments:
             words = segment.text.split()
             segment_duration = segment.end - segment.start
-            words_per_second = (
+            (
                 len(words) / segment_duration if segment_duration > 0 else 0
             )
 

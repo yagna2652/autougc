@@ -6,7 +6,6 @@ that produce realistic human mechanics in Sora 2.
 """
 
 from src.mechanics.models import (
-    SegmentType,
     HandPosition,
     ExpressionState,
     BodyPosture,

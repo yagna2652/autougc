@@ -38,9 +38,8 @@ def generate_base_prompt_node(state: PipelineState) -> dict[str, Any]:
     Returns:
         Partial state update with base_prompt, suggested_script, and progress
     """
-    import anthropic
 
-    blueprint = state.get("blueprint", {})
+    state.get("blueprint", {})
     blueprint_summary = state.get("blueprint_summary", {})
     product_analysis = state.get("product_analysis", {})
     product_description = state.get("product_description", "")

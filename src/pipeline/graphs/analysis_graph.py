@@ -13,11 +13,11 @@ The graph uses LangGraph's StateGraph to manage state flow between nodes.
 """
 
 import logging
-from typing import Any, Literal
+from typing import Literal
 
 from langgraph.graph import END, START, StateGraph
 
-from src.pipeline.state import PipelineState, PipelineStatus
+from src.pipeline.state import PipelineState
 
 logger = logging.getLogger(__name__)
 

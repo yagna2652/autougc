@@ -5,9 +5,9 @@ This module defines the complete state that flows through the UGC generation pip
 Using TypedDict for compatibility with LangGraph's state management.
 """
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from enum import Enum
-from typing import Any, Optional, TypedDict
+from typing import Any, TypedDict
 
 
 class PipelineStatus(str, Enum):

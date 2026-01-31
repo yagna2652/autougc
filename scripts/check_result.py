@@ -94,7 +94,7 @@ def main():
     except urllib.error.HTTPError as e:
         print(f"Error: Job {job_id} not found (HTTP {e.code})")
         sys.exit(1)
-    except urllib.error.URLError as e:
+    except urllib.error.URLError:
         print(f"Error: Could not connect to server at localhost:8000")
         print(f"       Make sure the API server is running")
         sys.exit(1)

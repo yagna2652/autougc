@@ -11,12 +11,10 @@ Supports both:
 
 import logging
 import os
-import time
 from typing import Any
 
 from src.pipeline.state import (
     PipelineState,
-    PipelineStatus,
     PipelineStep,
     mark_completed,
     mark_failed,
@@ -269,7 +267,7 @@ def _call_fal_api(
         API result or None on failure
     """
     try:
-        from fal_client import FalClient, submit
+        from fal_client import FalClient
 
         # Configure client
         client = FalClient(key=fal_key)

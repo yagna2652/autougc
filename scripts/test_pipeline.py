@@ -17,7 +17,6 @@ Usage:
 """
 
 import argparse
-import json
 import logging
 import os
 import sys
@@ -35,6 +34,8 @@ logger = logging.getLogger(__name__)
 
 def test_imports():
     """Test that all pipeline modules can be imported."""
+    # Note: These imports are intentionally "unused" - we're testing that they work
+    # ruff: noqa: F401
     print("\n" + "=" * 60)
     print("TEST: Imports")
     print("=" * 60)
@@ -261,9 +262,9 @@ def test_full_pipeline_dry_run():
     print("=" * 60)
 
     try:
-        from src.pipeline import create_initial_state, stream_pipeline
+        from src.pipeline import create_initial_state
 
-        state = create_initial_state(
+        create_initial_state(
             video_url="https://example.com/test.mp4",
             product_description="Test product",
         )

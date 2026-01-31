@@ -65,7 +65,7 @@ def test_langsmith_connection():
     try:
         client = Client()
         # Try to list projects (this will fail if API key is invalid)
-        projects = list(client.list_projects(limit=1))
+        list(client.list_projects(limit=1))
         print("   ✓ Successfully connected to LangSmith!")
         print(f"   ✓ API key is valid")
     except Exception as e:
@@ -76,7 +76,7 @@ def test_langsmith_connection():
     # Test our tracing module
     print("\n4. Testing AutoUGC tracing module...")
     try:
-        from src.tracing import TracedAnthropicClient, is_tracing_enabled
+        from src.tracing import is_tracing_enabled
 
         if is_tracing_enabled():
             print("   ✓ Tracing is enabled")

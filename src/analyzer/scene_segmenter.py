@@ -24,10 +24,8 @@ from src.models.blueprint import (
     ProductAppearance,
     Scene,
     SceneBreakdown,
-    SceneTransition,
     SceneType,
     ShotType,
-    TransitionType,
 )
 from src.tracing import TracedAnthropicClient, is_tracing_enabled
 

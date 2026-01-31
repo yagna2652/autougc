@@ -11,13 +11,11 @@ detailed mechanics-enhanced prompts that include specific instructions for:
 """
 
 import logging
-import os
 from typing import Any
 
 from src.pipeline.state import (
     PipelineState,
     PipelineStep,
-    mark_failed,
     update_progress,
 )
 
