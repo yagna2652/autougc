@@ -136,14 +136,34 @@ def analyze_product_node(state: PipelineState) -> dict[str, Any]:
             "suggested_showcase": analysis_result.get("suggestedShowcase", ""),
         }
 
+        # Extract rich product context from analysis
+        # This enriches the product_context with auto-extracted details
+        extracted_context = {
+            "type": analysis_result.get("type", ""),
+            "interactions": analysis_result.get("interactions", []),
+            "tactile_features": analysis_result.get("tactileFeatures", []),
+            "sound_features": analysis_result.get("soundFeatures", []),
+            "size_description": analysis_result.get("sizeDescription", ""),
+            "highlight_feature": analysis_result.get("highlightFeature", ""),
+        }
+
+        # Merge with existing product_context (user-provided takes precedence)
+        existing_context = state.get("product_context", {}) or {}
+        merged_context = {**extracted_context}
+        for key, value in existing_context.items():
+            if value:  # Only override if user provided a non-empty value
+                merged_context[key] = value
+
         logger.info(
             f"Product analysis complete: type={product_analysis.get('type')}, "
-            f"features={len(product_analysis.get('key_features', []))}"
+            f"features={len(product_analysis.get('key_features', []))}, "
+            f"interactions={len(merged_context.get('interactions', []))}"
         )
 
         return {
             **progress_update,
             "product_analysis": product_analysis,
+            "product_context": merged_context,
         }
 
     except anthropic.APIError as e:
@@ -287,6 +307,9 @@ def _build_analysis_prompt(context_info: str) -> str:
     """
     Build the product analysis prompt for Claude.
 
+    This prompt extracts rich product context for UGC video generation,
+    including physical interactions, tactile qualities, sounds, and size.
+
     Args:
         context_info: Product context information
 
@@ -300,22 +323,56 @@ User-provided information about this product:
 {context_info}
 """
 
-    return f"""Analyze the product image(s) provided and identify:
+    return f"""Analyze the product image(s) provided for a UGC-style TikTok video.
 
-1. What type of product this is
-2. A detailed description of the product
-3. Key features visible in the image
-4. The best way to showcase this product in a UGC-style TikTok video
+I need DETAILED information to create a realistic product demonstration video. Think about how a real person would interact with this product on camera.
 
 {context_section}
 
+Analyze and provide:
+
+1. **Product Type**: What category/type of product is this?
+
+2. **Physical Description**: Describe the product's appearance (color, shape, materials, packaging)
+
+3. **Size & Scale**: How big is it? Can it be held in one hand? Palm-sized? Needs two hands?
+
+4. **Key Features**: What are the standout features visible in the image?
+
+5. **Physical Interactions**: How would someone USE this product on camera?
+   - What actions would they perform? (open, squeeze, pump, spray, apply, press, twist, shake, etc.)
+   - What hand movements are involved?
+   - Would they demonstrate it on themselves or show it to camera?
+
+6. **Tactile Qualities**: What would it FEEL like?
+   - Texture (smooth, rough, soft, firm, squishy, etc.)
+   - Weight (light, heavy, substantial)
+   - Temperature sensation if applicable
+   - How it feels during/after use
+
+7. **Sound Features**: What sounds might this product make?
+   - Packaging sounds (click, pop, snap, crinkle)
+   - Usage sounds (spray, pump, squeeze, fizz)
+   - Any satisfying ASMR-worthy sounds?
+
+8. **Best Way to Showcase**: How should this be shown in a TikTok?
+   - What's the most visually interesting aspect?
+   - What would make viewers want to try it?
+
 Respond in this exact JSON format:
 {{
-  "type": "the product type/category",
-  "description": "detailed description of the product based on the image",
+  "type": "specific product type/category",
+  "description": "detailed visual description of the product",
   "keyFeatures": ["feature1", "feature2", "feature3"],
-  "suggestedShowcase": "how to best show this product in a UGC video"
+  "sizeDescription": "size description (e.g., 'palm-sized bottle', 'compact case fits in pocket', 'large tub needs two hands')",
+  "interactions": ["interaction1", "interaction2", "interaction3"],
+  "tactileFeatures": ["tactile1", "tactile2", "tactile3"],
+  "soundFeatures": ["sound1", "sound2"],
+  "highlightFeature": "the single most impressive/interesting feature to emphasize",
+  "suggestedShowcase": "specific recommendation for how to showcase this in a UGC video"
 }}
+
+Be SPECIFIC and DETAILED. Think like a content creator who needs to make this product look amazing on camera.
 
 Return ONLY valid JSON, no other text."""
 
