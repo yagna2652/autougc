@@ -2,6 +2,11 @@
 
 import { useState } from "react";
 import { VideoGenerationLoader } from "@/components/video-loader";
+import {
+  usePipeline,
+  type ProductContext,
+  type PipelineConfig,
+} from "@/hooks/usePipeline";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -84,7 +89,43 @@ export default function Home() {
   const [startingFrameUrl, setStartingFrameUrl] = useState<string | null>(null);
   const [startingFramePrompt, setStartingFramePrompt] = useState("");
   const [isGeneratingFrame, setIsGeneratingFrame] = useState(false);
-  const [frameGenerationError, setFrameGenerationError] = useState<string | null>(null);
+  const [frameGenerationError, setFrameGenerationError] = useState<
+    string | null
+  >(null);
+
+  // New: Full blueprint for pipeline (not just summary)
+  const [fullBlueprint, setFullBlueprint] = useState<Record<
+    string,
+    unknown
+  > | null>(null);
+
+  // New: Pipeline state for prompt source tracking
+  const [promptSource, setPromptSource] = useState<
+    "mechanics" | "base" | "fallback" | null
+  >(null);
+
+  // New: Use the LangGraph pipeline hook
+  const pipeline = usePipeline({
+    pollInterval: 2000,
+    onProgress: (result) => {
+      setAnalysisProgress(
+        `${result.currentStep} (${result.progress?.percentage?.toFixed(0) || 0}%)`,
+      );
+    },
+    onComplete: (result) => {
+      if (result.finalPrompt) {
+        setGeneratedPrompt(result.finalPrompt);
+        setPromptSource(result.promptSource || null);
+        if (result.promptSource === "mechanics") {
+          console.log("✅ Using mechanics-enhanced prompt!");
+        }
+      }
+      setCurrentStep(4);
+    },
+    onError: (error) => {
+      setAnalysisError(error);
+    },
+  });
 
   const handleAnalyzeTikTok = async () => {
     if (!tiktokUrl) return;
@@ -149,6 +190,11 @@ export default function Home() {
 
           // Map blueprint result to state
           const blueprint = data.result;
+
+          // Store the FULL blueprint for the pipeline (this was missing before!)
+          setFullBlueprint(blueprint);
+
+          // Store simplified version for UI
           setBlueprintData({
             transcript: blueprint.transcript.full_text,
             hookStyle: blueprint.structure.hook.style,
@@ -195,7 +241,9 @@ export default function Home() {
   };
 
   // Starting frame handlers
-  const handleStartingFrameUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleStartingFrameUpload = (
+    e: React.ChangeEvent<HTMLInputElement>,
+  ) => {
     if (e.target.files && e.target.files[0]) {
       setStartingFrame(e.target.files[0]);
       setStartingFrameUrl(URL.createObjectURL(e.target.files[0]));
@@ -262,7 +310,9 @@ export default function Home() {
     } catch (error) {
       console.error("Frame generation error:", error);
       setFrameGenerationError(
-        error instanceof Error ? error.message : "Failed to generate starting frame"
+        error instanceof Error
+          ? error.message
+          : "Failed to generate starting frame",
       );
     } finally {
       setIsGeneratingFrame(false);
@@ -316,9 +366,115 @@ export default function Home() {
   const handleGeneratePrompt = async () => {
     if (!blueprintData) return;
 
-    // If no product images, use template-based prompt
-    if (productImages.length === 0) {
-      const prompt = `iPhone 13 front facing camera video, filmed vertically for TikTok,
+    // Use the new LangGraph pipeline for prompt generation
+    // This ensures mechanics prompts are properly used!
+    setIsAnalyzingProduct(true);
+    setAnalysisError(null);
+    setPromptSource(null);
+
+    try {
+      // Convert images to base64 with compression (max 800px, 70% quality)
+      const base64Images =
+        productImages.length > 0
+          ? await Promise.all(
+              productImages
+                .slice(0, 3)
+                .map((file) => compressImage(file, 800, 0.7)),
+            )
+          : [];
+
+      // Build product context if any advanced fields are filled
+      const hasProductContext =
+        productType ||
+        productInteractions ||
+        tactileFeatures ||
+        soundFeatures ||
+        sizeDescription ||
+        highlightFeature ||
+        customInstructions;
+
+      const productContext: ProductContext | undefined = hasProductContext
+        ? {
+            type: productType,
+            interactions: productInteractions
+              .split(",")
+              .map((s) => s.trim())
+              .filter(Boolean),
+            tactileFeatures: tactileFeatures
+              .split(",")
+              .map((s) => s.trim())
+              .filter(Boolean),
+            soundFeatures: soundFeatures
+              .split(",")
+              .map((s) => s.trim())
+              .filter(Boolean),
+            sizeDescription,
+            highlightFeature,
+            customInstructions,
+          }
+        : undefined;
+
+      // Build the blueprint for the pipeline
+      // Use full blueprint if available, otherwise construct from summary
+      const blueprintForPipeline = fullBlueprint || {
+        source_video: "analyzed_video",
+        total_duration: blueprintData.duration,
+        transcript: { full_text: blueprintData.transcript },
+        structure: {
+          hook: { style: blueprintData.hookStyle, text: "" },
+          body: { framework: blueprintData.bodyFramework, text: "" },
+          cta: { urgency: blueprintData.ctaUrgency, text: "" },
+        },
+      };
+
+      // Config for the pipeline
+      const pipelineConfig: PipelineConfig = {
+        enableMechanics: true, // Always enable mechanics!
+        productCategory: productType || "general",
+        targetDuration: blueprintData.duration || 8.0,
+        energyLevel: blueprintData.energy || "medium",
+      };
+
+      // Use the new pipeline to generate prompts
+      // This will use mechanics-enhanced prompts when available
+      const jobId = await pipeline.generatePrompt({
+        blueprint: blueprintForPipeline,
+        blueprintSummary: {
+          transcript: blueprintData.transcript,
+          hookStyle: blueprintData.hookStyle,
+          bodyFramework: blueprintData.bodyFramework,
+          ctaUrgency: blueprintData.ctaUrgency,
+          setting: blueprintData.setting,
+          lighting: blueprintData.lighting,
+          energy: blueprintData.energy,
+          duration: blueprintData.duration,
+        },
+        productImages: base64Images,
+        productDescription,
+        productContext,
+        config: pipelineConfig,
+      });
+
+      if (!jobId) {
+        throw new Error("Failed to start prompt generation");
+      }
+
+      // The pipeline hook will handle polling and update state via callbacks
+      // isAnalyzingProduct will be set to false when the pipeline completes
+    } catch (error) {
+      console.error("Pipeline error:", error);
+      setAnalysisError(
+        error instanceof Error ? error.message : "Unknown error occurred",
+      );
+      setIsAnalyzingProduct(false);
+    }
+  };
+
+  // Legacy prompt generation (fallback if pipeline fails)
+  const handleGeneratePromptLegacy = async () => {
+    if (!blueprintData) return;
+
+    const prompt = `iPhone 13 front facing camera video, filmed vertically for TikTok,
 a real young woman not a model, mid-20s, average everyday appearance,
 holding ${productDescription || "the product"} up to show the camera while talking excitedly,
 
@@ -354,70 +510,9 @@ CTA: ${blueprintData.ctaUrgency}
 SCRIPT REFERENCE:
 "${blueprintData.transcript}"`;
 
-      setGeneratedPrompt(prompt);
-      setCurrentStep(4);
-      return;
-    }
-
-    // Use Claude to analyze product images and generate smart prompt
-    setIsAnalyzingProduct(true);
-    setAnalysisError(null);
-
-    try {
-      // Convert images to base64 with compression (max 800px, 70% quality)
-      const base64Images = await Promise.all(
-        productImages.slice(0, 3).map((file) => compressImage(file, 800, 0.7)),
-      );
-
-      // Build product context if any advanced fields are filled
-      const hasProductContext = productType || productInteractions || tactileFeatures ||
-        soundFeatures || sizeDescription || highlightFeature || customInstructions;
-
-      const productContext = hasProductContext ? {
-        type: productType,
-        interactions: productInteractions.split(",").map(s => s.trim()).filter(Boolean),
-        tactileFeatures: tactileFeatures.split(",").map(s => s.trim()).filter(Boolean),
-        soundFeatures: soundFeatures.split(",").map(s => s.trim()).filter(Boolean),
-        sizeDescription,
-        highlightFeature,
-        customInstructions,
-      } : undefined;
-
-      const response = await fetch("/api/analyze", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          productImages: base64Images,
-          productDescription,
-          blueprintData,
-          productContext,
-        }),
-      });
-
-      const data = await response.json();
-
-      if (!response.ok) {
-        throw new Error(data.error || "Failed to analyze product");
-      }
-
-      if (data.success) {
-        setProductAnalysis(data.analysis);
-        setGeneratedPrompt(data.prompt);
-        setSuggestedScript(data.suggestedScript || "");
-        setCurrentStep(4);
-      } else {
-        throw new Error("Analysis failed");
-      }
-    } catch (error) {
-      console.error("Analysis error:", error);
-      setAnalysisError(
-        error instanceof Error ? error.message : "Unknown error occurred",
-      );
-    } finally {
-      setIsAnalyzingProduct(false);
-    }
+    setGeneratedPrompt(prompt);
+    setPromptSource("fallback");
+    setCurrentStep(4);
   };
 
   const handleGenerateVideo = async () => {
@@ -449,7 +544,9 @@ SCRIPT REFERENCE:
             const uploadData = await uploadResponse.json();
 
             if (!uploadResponse.ok) {
-              throw new Error(uploadData.error || "Failed to upload starting frame");
+              throw new Error(
+                uploadData.error || "Failed to upload starting frame",
+              );
             }
 
             imageUrl = uploadData.url;
@@ -460,7 +557,11 @@ SCRIPT REFERENCE:
         }
       }
       // Priority 2: Fall back to product images if no starting frame
-      else if (useImageToVideo && productImages.length > 0 && !uploadedImageUrl) {
+      else if (
+        useImageToVideo &&
+        productImages.length > 0 &&
+        !uploadedImageUrl
+      ) {
         setGenerationProgress("Uploading product image...");
 
         // Compress the first product image and upload it
@@ -681,9 +782,7 @@ SCRIPT REFERENCE:
                   <p className="font-medium text-destructive">
                     Analysis Failed
                   </p>
-                  <p className="text-sm text-destructive/80">
-                    {analysisError}
-                  </p>
+                  <p className="text-sm text-destructive/80">{analysisError}</p>
                 </div>
               )}
             </CardContent>
@@ -776,16 +875,21 @@ SCRIPT REFERENCE:
                   onClick={() => setShowAdvancedProduct(!showAdvancedProduct)}
                   className="w-full px-4 py-3 flex items-center justify-between bg-muted/50 hover:bg-muted transition-colors"
                 >
-                  <span className="font-medium text-sm">Advanced Product Details</span>
+                  <span className="font-medium text-sm">
+                    Advanced Product Details
+                  </span>
                   <span className="text-muted-foreground text-xs">
-                    {showAdvancedProduct ? "▲ Hide" : "▼ Show"} (for custom mechanics)
+                    {showAdvancedProduct ? "▲ Hide" : "▼ Show"} (for custom
+                    mechanics)
                   </span>
                 </button>
 
                 {showAdvancedProduct && (
                   <div className="p-4 space-y-4 bg-muted/20">
                     <p className="text-xs text-muted-foreground">
-                      These fields help generate product-specific video mechanics (e.g., how to show tactile feedback, sounds, size).
+                      These fields help generate product-specific video
+                      mechanics (e.g., how to show tactile feedback, sounds,
+                      size).
                     </p>
 
                     <div className="grid grid-cols-2 gap-4">
@@ -800,7 +904,9 @@ SCRIPT REFERENCE:
                       </div>
 
                       <div className="space-y-2">
-                        <Label htmlFor="size-description">Size Description</Label>
+                        <Label htmlFor="size-description">
+                          Size Description
+                        </Label>
                         <Input
                           id="size-description"
                           placeholder="e.g., small palm-sized, handheld"
@@ -818,19 +924,25 @@ SCRIPT REFERENCE:
                         value={productInteractions}
                         onChange={(e) => setProductInteractions(e.target.value)}
                       />
-                      <p className="text-xs text-muted-foreground">How users interact with the product</p>
+                      <p className="text-xs text-muted-foreground">
+                        How users interact with the product
+                      </p>
                     </div>
 
                     <div className="grid grid-cols-2 gap-4">
                       <div className="space-y-2">
-                        <Label htmlFor="tactile-features">Tactile Features</Label>
+                        <Label htmlFor="tactile-features">
+                          Tactile Features
+                        </Label>
                         <Input
                           id="tactile-features"
                           placeholder="e.g., responsive keys, satisfying click"
                           value={tactileFeatures}
                           onChange={(e) => setTactileFeatures(e.target.value)}
                         />
-                        <p className="text-xs text-muted-foreground">Touch/feel qualities</p>
+                        <p className="text-xs text-muted-foreground">
+                          Touch/feel qualities
+                        </p>
                       </div>
 
                       <div className="space-y-2">
@@ -841,12 +953,16 @@ SCRIPT REFERENCE:
                           value={soundFeatures}
                           onChange={(e) => setSoundFeatures(e.target.value)}
                         />
-                        <p className="text-xs text-muted-foreground">Audio qualities to emphasize</p>
+                        <p className="text-xs text-muted-foreground">
+                          Audio qualities to emphasize
+                        </p>
                       </div>
                     </div>
 
                     <div className="space-y-2">
-                      <Label htmlFor="highlight-feature">Key Feature to Highlight</Label>
+                      <Label htmlFor="highlight-feature">
+                        Key Feature to Highlight
+                      </Label>
                       <Input
                         id="highlight-feature"
                         placeholder="e.g., the clicking/pressing fidget action"
@@ -856,7 +972,9 @@ SCRIPT REFERENCE:
                     </div>
 
                     <div className="space-y-2">
-                      <Label htmlFor="custom-instructions">Custom Instructions</Label>
+                      <Label htmlFor="custom-instructions">
+                        Custom Instructions
+                      </Label>
                       <Textarea
                         id="custom-instructions"
                         placeholder="Any additional instructions for how to showcase the product..."
@@ -876,7 +994,8 @@ SCRIPT REFERENCE:
                 <div>
                   <h4 className="font-medium mb-1">Starting Frame</h4>
                   <p className="text-sm text-muted-foreground">
-                    Upload or generate the first frame of your video. This anchors the product appearance and scene composition.
+                    Upload or generate the first frame of your video. This
+                    anchors the product appearance and scene composition.
                   </p>
                 </div>
 
@@ -931,7 +1050,9 @@ SCRIPT REFERENCE:
                       />
                       <Button
                         onClick={generateStartingFrame}
-                        disabled={isGeneratingFrame || !startingFramePrompt.trim()}
+                        disabled={
+                          isGeneratingFrame || !startingFramePrompt.trim()
+                        }
                         className="w-full"
                         size="sm"
                       >
@@ -944,7 +1065,9 @@ SCRIPT REFERENCE:
                 {/* Generation Error */}
                 {frameGenerationError && (
                   <div className="rounded-lg border border-destructive bg-destructive/10 p-3">
-                    <p className="text-sm text-destructive">{frameGenerationError}</p>
+                    <p className="text-sm text-destructive">
+                      {frameGenerationError}
+                    </p>
                   </div>
                 )}
 
@@ -954,7 +1077,9 @@ SCRIPT REFERENCE:
                     <div className="flex items-center gap-3">
                       <div className="h-5 w-5 animate-spin rounded-full border-2 border-primary border-t-transparent" />
                       <div>
-                        <p className="font-medium">Generating starting frame...</p>
+                        <p className="font-medium">
+                          Generating starting frame...
+                        </p>
                         <p className="text-sm text-muted-foreground">
                           This may take 10-30 seconds
                         </p>
@@ -1055,10 +1180,10 @@ SCRIPT REFERENCE:
                 <Button
                   onClick={handleGeneratePrompt}
                   className="flex-1"
-                  disabled={isAnalyzingProduct}
+                  disabled={isAnalyzingProduct || pipeline.isLoading}
                 >
-                  {isAnalyzingProduct
-                    ? "Analyzing..."
+                  {isAnalyzingProduct || pipeline.isLoading
+                    ? `Generating... ${pipeline.result?.progress?.percentage?.toFixed(0) || 0}%`
                     : productImages.length > 0
                       ? "Analyze & Generate Smart Prompt"
                       : "Generate Prompt"}
@@ -1070,6 +1195,56 @@ SCRIPT REFERENCE:
                   💡 Tip: Go back and upload product images to enable AI-powered
                   prompt generation
                 </p>
+              )}
+
+              {/* Pipeline Progress */}
+              {pipeline.isLoading && (
+                <div className="rounded-lg border border-primary/20 bg-primary/5 p-4 space-y-2">
+                  <div className="flex items-center gap-3">
+                    <div className="h-5 w-5 animate-spin rounded-full border-2 border-primary border-t-transparent" />
+                    <div className="flex-1">
+                      <p className="font-medium">
+                        {pipeline.result?.currentStep?.replace(/_/g, " ") ||
+                          "Processing..."}
+                      </p>
+                      <p className="text-sm text-muted-foreground">
+                        Using LangGraph pipeline with mechanics enhancement
+                      </p>
+                    </div>
+                    <span className="text-sm font-mono text-primary">
+                      {pipeline.result?.progress?.percentage?.toFixed(0) || 0}%
+                    </span>
+                  </div>
+                  <div className="h-2 bg-muted rounded-full overflow-hidden">
+                    <div
+                      className="h-full bg-primary transition-all duration-300"
+                      style={{
+                        width: `${pipeline.result?.progress?.percentage || 0}%`,
+                      }}
+                    />
+                  </div>
+                </div>
+              )}
+
+              {/* Pipeline Error */}
+              {pipeline.error && (
+                <div className="rounded-lg border border-destructive bg-destructive/10 p-3">
+                  <p className="font-medium text-destructive">Pipeline Error</p>
+                  <p className="text-sm text-destructive/80">
+                    {pipeline.error}
+                  </p>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="mt-2"
+                    onClick={() => {
+                      pipeline.reset();
+                      handleGeneratePromptLegacy();
+                    }}
+                  >
+                    Try Legacy Method
+                  </Button>
+                </div>
               )}
             </CardContent>
           </Card>
@@ -1085,6 +1260,56 @@ SCRIPT REFERENCE:
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
+              {/* Prompt Source Indicator - Shows if mechanics prompt is being used */}
+              {promptSource && (
+                <div
+                  className={`rounded-lg border p-3 ${
+                    promptSource === "mechanics"
+                      ? "border-green-500 bg-green-500/10"
+                      : promptSource === "base"
+                        ? "border-yellow-500 bg-yellow-500/10"
+                        : "border-muted bg-muted/30"
+                  }`}
+                >
+                  <div className="flex items-center gap-2">
+                    {promptSource === "mechanics" ? (
+                      <>
+                        <span className="text-green-600">✓</span>
+                        <Badge
+                          variant="default"
+                          className="bg-green-600 hover:bg-green-700"
+                        >
+                          Mechanics Enhanced
+                        </Badge>
+                        <span className="text-sm text-green-700">
+                          Using detailed human mechanics timeline
+                        </span>
+                      </>
+                    ) : promptSource === "base" ? (
+                      <>
+                        <span className="text-yellow-600">⚠</span>
+                        <Badge
+                          variant="default"
+                          className="bg-yellow-600 hover:bg-yellow-700"
+                        >
+                          Base Prompt
+                        </Badge>
+                        <span className="text-sm text-yellow-700">
+                          Mechanics generation was skipped
+                        </span>
+                      </>
+                    ) : (
+                      <>
+                        <Badge variant="secondary">Fallback</Badge>
+                        <span className="text-sm text-muted-foreground">
+                          Using template prompt
+                        </span>
+                      </>
+                    )}
+                  </div>
+                </div>
+              )}
+
               {/* Product Analysis Results */}
               {productAnalysis && (
                 <div className="rounded-lg border border-border bg-muted/30 p-4 space-y-3">
@@ -1176,7 +1401,9 @@ SCRIPT REFERENCE:
                   <div className="flex items-center justify-between">
                     <div className="space-y-0.5">
                       <Label htmlFor="use-i2v" className="text-base">
-                        {startingFrameUrl ? "Use Starting Frame" : "Use Product Image"}
+                        {startingFrameUrl
+                          ? "Use Starting Frame"
+                          : "Use Product Image"}
                       </Label>
                       <p className="text-xs text-muted-foreground">
                         {startingFrameUrl
@@ -1199,8 +1426,15 @@ SCRIPT REFERENCE:
                   {useImageToVideo && (
                     <div className="rounded-lg border border-border bg-muted/30 p-3 space-y-2">
                       <div className="flex items-center gap-2">
-                        <Badge variant="default" className={startingFrameUrl ? "bg-blue-600" : "bg-green-600"}>
-                          {startingFrameUrl ? "Starting Frame" : "Image-to-Video"}
+                        <Badge
+                          variant="default"
+                          className={
+                            startingFrameUrl ? "bg-blue-600" : "bg-green-600"
+                          }
+                        >
+                          {startingFrameUrl
+                            ? "Starting Frame"
+                            : "Image-to-Video"}
                         </Badge>
                         <span className="text-xs text-muted-foreground">
                           {startingFrameUrl
@@ -1211,17 +1445,27 @@ SCRIPT REFERENCE:
                       <div className="flex items-center gap-3">
                         <div className="w-16 h-28 rounded-md overflow-hidden border border-border bg-background">
                           <img
-                            src={startingFrameUrl || URL.createObjectURL(productImages[0])}
-                            alt={startingFrameUrl ? "Starting frame" : "Product"}
+                            src={
+                              startingFrameUrl ||
+                              URL.createObjectURL(productImages[0])
+                            }
+                            alt={
+                              startingFrameUrl ? "Starting frame" : "Product"
+                            }
                             className="w-full h-full object-cover"
                           />
                         </div>
                         <div className="text-xs text-muted-foreground space-y-1">
                           {startingFrameUrl ? (
                             <>
-                              <p><strong>Type:</strong> {startingFrame ? "Uploaded" : "AI Generated"}</p>
+                              <p>
+                                <strong>Type:</strong>{" "}
+                                {startingFrame ? "Uploaded" : "AI Generated"}
+                              </p>
                               {startingFrame && (
-                                <p><strong>File:</strong> {startingFrame.name}</p>
+                                <p>
+                                  <strong>File:</strong> {startingFrame.name}
+                                </p>
                               )}
                               {!startingFrameUrl.startsWith("blob:") && (
                                 <p className="text-green-600">✓ Ready to use</p>
@@ -1229,10 +1473,17 @@ SCRIPT REFERENCE:
                             </>
                           ) : (
                             <>
-                              <p><strong>File:</strong> {productImages[0].name}</p>
-                              <p><strong>Size:</strong> {(productImages[0].size / 1024).toFixed(1)} KB</p>
+                              <p>
+                                <strong>File:</strong> {productImages[0].name}
+                              </p>
+                              <p>
+                                <strong>Size:</strong>{" "}
+                                {(productImages[0].size / 1024).toFixed(1)} KB
+                              </p>
                               {uploadedImageUrl && (
-                                <p className="text-green-600">✓ Uploaded to Fal storage</p>
+                                <p className="text-green-600">
+                                  ✓ Uploaded to Fal storage
+                                </p>
                               )}
                             </>
                           )}
