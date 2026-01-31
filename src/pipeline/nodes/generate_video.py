@@ -48,12 +48,24 @@ def generate_video_node(state: dict[str, Any]) -> dict[str, Any]:
 
     # Get config
     config = state.get("config", {})
-    video_model = config.get("video_model", "kling")
+    video_model = config.get("video_model", "sora")
     video_duration = config.get("video_duration", 5)
     aspect_ratio = config.get("aspect_ratio", "9:16")
 
+    # Sora 2 only supports 4, 8, or 12 second durations
+    if "sora" in video_model:
+        valid_sora_durations = [4, 8, 12]
+        if video_duration not in valid_sora_durations:
+            # Map to nearest valid duration
+            video_duration = min(
+                valid_sora_durations, key=lambda x: abs(x - video_duration)
+            )
+            logger.info(
+                f"Adjusted duration to {video_duration}s for Sora 2 (valid: 4, 8, 12)"
+            )
+
     # Get endpoint
-    endpoint = MODEL_ENDPOINTS.get(video_model, MODEL_ENDPOINTS["kling"])
+    endpoint = MODEL_ENDPOINTS.get(video_model, MODEL_ENDPOINTS["sora"])
 
     logger.info(f"Using model: {video_model} ({endpoint})")
     logger.info(f"Prompt: {video_prompt[:100]}...")
@@ -133,10 +145,10 @@ def _call_fal_api(
                 "aspect_ratio": aspect_ratio,
             }
         else:
-            # Sora format
+            # Sora 2 format - duration must be 4, 8, or 12
             api_input = {
                 "prompt": prompt,
-                "duration": duration,
+                "duration": duration,  # Already validated/adjusted above
                 "aspect_ratio": aspect_ratio,
             }
 

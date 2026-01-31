@@ -15,6 +15,7 @@ interface StartRequest {
   videoUrl: string;
   productDescription?: string;
   productImages?: string[];
+  videoModel?: "sora" | "kling";
 }
 
 interface StatusRequest {
@@ -53,6 +54,9 @@ async function handleStart(body: StartRequest) {
     video_url: body.videoUrl,
     product_description: body.productDescription || "",
     product_images: body.productImages || [],
+    config: {
+      video_model: body.videoModel || "sora",
+    },
   };
 
   console.log("Starting pipeline:", requestBody.video_url);

@@ -13,6 +13,13 @@ import {
 } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 
 type Status = "idle" | "running" | "completed" | "failed";
 
@@ -31,6 +38,7 @@ export default function Home() {
   // Input state
   const [tiktokUrl, setTiktokUrl] = useState("");
   const [productDescription, setProductDescription] = useState("");
+  const [videoModel, setVideoModel] = useState<"sora" | "kling">("sora");
 
   // Pipeline state
   const [status, setStatus] = useState<Status>("idle");
@@ -106,6 +114,7 @@ export default function Home() {
           action: "start",
           videoUrl: tiktokUrl,
           productDescription,
+          videoModel,
         }),
       });
 
@@ -174,6 +183,29 @@ export default function Home() {
                 disabled={status === "running"}
                 rows={3}
               />
+            </div>
+            <div>
+              <Label htmlFor="video-model">Video Generation Model</Label>
+              <Select
+                value={videoModel}
+                onValueChange={(value: "sora" | "kling") =>
+                  setVideoModel(value)
+                }
+                disabled={status === "running"}
+              >
+                <SelectTrigger id="video-model" className="mt-1">
+                  <SelectValue placeholder="Select model" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="sora">Sora 2 (OpenAI)</SelectItem>
+                  <SelectItem value="kling">Kling 2.5 (Kuaishou)</SelectItem>
+                </SelectContent>
+              </Select>
+              <p className="text-sm text-gray-500 mt-1">
+                {videoModel === "sora"
+                  ? "Sora 2 - Best for realistic, cinematic videos (4/8/12s)"
+                  : "Kling 2.5 - Fast generation with good quality (5s)"}
+              </p>
             </div>
             <div className="flex gap-2">
               <Button

@@ -74,7 +74,7 @@ class PipelineConfigModel(BaseModel):
         default="claude-sonnet-4-20250514", description="Claude model to use"
     )
     num_frames: int = Field(default=5, description="Number of frames to extract")
-    video_model: str = Field(default="kling", description="Video model (kling or sora)")
+    video_model: str = Field(default="sora", description="Video model (sora or kling)")
     video_duration: int = Field(default=5, description="Video duration in seconds")
     aspect_ratio: str = Field(default="9:16", description="Video aspect ratio")
 

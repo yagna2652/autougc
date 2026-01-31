@@ -88,7 +88,7 @@ def create_initial_state(
 DEFAULT_CONFIG = {
     "claude_model": "claude-sonnet-4-20250514",
     "num_frames": 5,
-    "video_model": "kling",  # kling or sora
+    "video_model": "sora",  # sora or kling
     "video_duration": 5,
     "aspect_ratio": "9:16",
 }
