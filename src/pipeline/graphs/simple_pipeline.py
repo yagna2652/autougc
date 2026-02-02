@@ -5,8 +5,9 @@ A clean, minimal pipeline:
 1. Download TikTok video
 2. Extract frames
 3. Analyze with Claude Vision
-4. Generate video prompt
-5. Generate video
+4. Classify UGC intent/archetype
+5. Generate video prompt
+6. Generate video
 
 All steps are traced via LangSmith for observability.
 """
@@ -23,6 +24,7 @@ logger = logging.getLogger(__name__)
 
 # Import nodes
 from src.pipeline.nodes.analyze_video import analyze_video_node
+from src.pipeline.nodes.classify_ugc_intent import classify_ugc_intent_node
 from src.pipeline.nodes.download_video import download_video_node
 from src.pipeline.nodes.extract_frames import extract_frames_node
 from src.pipeline.nodes.generate_prompt import generate_prompt_node
@@ -42,7 +44,7 @@ def build_pipeline() -> StateGraph:
     Build the simple UGC generation pipeline.
 
     Flow:
-        START → download → extract_frames → analyze → generate_prompt → generate_video → END
+        START → download → extract_frames → analyze → classify_ugc_intent → generate_prompt → generate_video → END
 
     Returns:
         Compiled StateGraph ready for execution
@@ -54,6 +56,7 @@ def build_pipeline() -> StateGraph:
     workflow.add_node("download_video", download_video_node)
     workflow.add_node("extract_frames", extract_frames_node)
     workflow.add_node("analyze_video", analyze_video_node)
+    workflow.add_node("classify_ugc_intent", classify_ugc_intent_node)
     workflow.add_node("generate_prompt", generate_prompt_node)
     workflow.add_node("generate_video", generate_video_node)
 
@@ -81,6 +84,15 @@ def build_pipeline() -> StateGraph:
 
     workflow.add_conditional_edges(
         "analyze_video",
+        should_continue,
+        {
+            "continue": "classify_ugc_intent",
+            "end": END,
+        },
+    )
+
+    workflow.add_conditional_edges(
+        "classify_ugc_intent",
         should_continue,
         {
             "continue": "generate_prompt",

@@ -108,6 +108,7 @@ class JobStatusResponse(BaseModel):
     current_step: str = ""
     error: str = ""
     video_analysis: Optional[dict[str, Any]] = None
+    ugc_intent: dict[str, Any] = {}
     video_prompt: str = ""
     suggested_script: str = ""
     generated_video_url: str = ""
@@ -257,6 +258,7 @@ async def get_job_status(job_id: str):
         current_step=state.get("current_step", ""),
         error=state.get("error", ""),
         video_analysis=state.get("video_analysis"),
+        ugc_intent=state.get("ugc_intent", {}),
         video_prompt=state.get("video_prompt", ""),
         suggested_script=state.get("suggested_script", ""),
         generated_video_url=state.get("generated_video_url", ""),

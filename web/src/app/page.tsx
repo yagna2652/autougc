@@ -29,6 +29,7 @@ interface PipelineResult {
   currentStep: string;
   error: string | null;
   videoAnalysis: Record<string, unknown> | null;
+  ugcIntent: Record<string, unknown> | null;
   videoPrompt: string;
   suggestedScript: string;
   generatedVideoUrl: string;
@@ -51,6 +52,9 @@ export default function Home() {
     string,
     unknown
   > | null>(null);
+  const [ugcIntent, setUgcIntent] = useState<Record<string, unknown> | null>(
+    null
+  );
   const [videoPrompt, setVideoPrompt] = useState("");
   const [suggestedScript, setSuggestedScript] = useState("");
   const [generatedVideoUrl, setGeneratedVideoUrl] = useState("");
@@ -74,6 +78,7 @@ export default function Home() {
         if (data.status === "completed") {
           setStatus("completed");
           setVideoAnalysis(data.videoAnalysis);
+          setUgcIntent(data.ugcIntent || null);
           setVideoPrompt(data.videoPrompt);
           setSuggestedScript(data.suggestedScript);
           setGeneratedVideoUrl(data.generatedVideoUrl);
@@ -102,6 +107,7 @@ export default function Home() {
     setCurrentStep("Starting...");
     setError(null);
     setVideoAnalysis(null);
+    setUgcIntent(null);
     setVideoPrompt("");
     setSuggestedScript("");
     setGeneratedVideoUrl("");
@@ -137,6 +143,7 @@ export default function Home() {
     setError(null);
     setJobId(null);
     setVideoAnalysis(null);
+    setUgcIntent(null);
     setVideoPrompt("");
     setSuggestedScript("");
     setGeneratedVideoUrl("");
@@ -291,11 +298,28 @@ export default function Home() {
               </Card>
             )}
 
+            {/* UGC Classification */}
+            {ugcIntent && Object.keys(ugcIntent).length > 0 && (
+              <Card className="mb-6">
+                <CardHeader>
+                  <CardTitle>4. UGC Classification</CardTitle>
+                  <CardDescription>
+                    Semantic intent classification for this video
+                  </CardDescription>
+                </CardHeader>
+                <CardContent>
+                  <pre className="bg-gray-100 dark:bg-gray-800 p-4 rounded-lg overflow-auto text-sm">
+                    {JSON.stringify(ugcIntent, null, 2)}
+                  </pre>
+                </CardContent>
+              </Card>
+            )}
+
             {/* Generated Prompt */}
             {videoPrompt && (
               <Card className="mb-6">
                 <CardHeader>
-                  <CardTitle>4. Generated Video Prompt</CardTitle>
+                  <CardTitle>5. Generated Video Prompt</CardTitle>
                   <CardDescription>
                     The prompt used for video generation
                   </CardDescription>
@@ -320,7 +344,7 @@ export default function Home() {
             {generatedVideoUrl && (
               <Card className="mb-6">
                 <CardHeader>
-                  <CardTitle>5. Generated Video</CardTitle>
+                  <CardTitle>6. Generated Video</CardTitle>
                   <CardDescription>
                     Your UGC-style video is ready!
                   </CardDescription>

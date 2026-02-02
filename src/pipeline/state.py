@@ -37,6 +37,7 @@ class PipelineState(TypedDict, total=False):
     video_path: str  # Downloaded video file path
     frames: list[str]  # List of extracted frame paths
     video_analysis: dict[str, Any]  # Claude Vision analysis
+    ugc_intent: dict[str, Any]  # UGC classification results
     video_prompt: str  # Generated prompt for video API
     suggested_script: str  # Suggested script/voiceover
 
@@ -78,6 +79,7 @@ def create_initial_state(
         video_path="",
         frames=[],
         video_analysis={},
+        ugc_intent={},
         video_prompt="",
         suggested_script="",
         generated_video_url="",

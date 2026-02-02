@@ -107,6 +107,7 @@ async function handleStatus(body: StatusRequest) {
     currentStep: data.current_step || "",
     error: data.error || null,
     videoAnalysis: data.video_analysis || null,
+    ugcIntent: data.ugc_intent || null,
     videoPrompt: data.video_prompt || "",
     suggestedScript: data.suggested_script || "",
     generatedVideoUrl: data.generated_video_url || "",
