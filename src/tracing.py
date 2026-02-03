@@ -157,6 +157,7 @@ class TracedMessages:
                     latency_ms = (time.time() - start_time) * 1000
 
                     # Extract response data for tracing
+                    # Include token usage at top level for LangSmith cost tracking
                     outputs = {
                         "content": [
                             {"type": block.type, "text": getattr(block, "text", None)}
@@ -164,11 +165,11 @@ class TracedMessages:
                         ],
                         "model": response.model,
                         "stop_reason": response.stop_reason,
-                        "usage": {
-                            "input_tokens": response.usage.input_tokens,
-                            "output_tokens": response.usage.output_tokens,
-                        },
                         "latency_ms": latency_ms,
+                        # Token usage fields for LangSmith
+                        "input_tokens": response.usage.input_tokens,
+                        "output_tokens": response.usage.output_tokens,
+                        "total_tokens": response.usage.input_tokens + response.usage.output_tokens,
                     }
 
                     # Update the run with outputs
