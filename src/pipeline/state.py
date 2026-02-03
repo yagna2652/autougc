@@ -29,6 +29,8 @@ class PipelineState(TypedDict, total=False):
     video_url: str
     product_description: str
     product_images: list[str]  # base64 or URLs
+    product_category: str  # e.g., 'mechanical_keyboard_keychain'
+    interaction_constraints: dict[str, Any]  # Optional constraints for interaction planning
 
     # Config
     config: dict[str, Any]
@@ -38,6 +40,8 @@ class PipelineState(TypedDict, total=False):
     frames: list[str]  # List of extracted frame paths
     video_analysis: dict[str, Any]  # Claude Vision analysis
     ugc_intent: dict[str, Any]  # UGC classification results
+    interaction_plan: dict[str, Any]  # Planned interaction sequence
+    selected_interactions: list[dict[str, Any]]  # Selected clips for each beat
     video_prompt: str  # Generated prompt for video API
     suggested_script: str  # Suggested script/voiceover
 
@@ -49,6 +53,8 @@ def create_initial_state(
     video_url: str,
     product_description: str = "",
     product_images: list[str] | None = None,
+    product_category: str = "mechanical_keyboard_keychain",
+    interaction_constraints: dict[str, Any] | None = None,
     config: dict[str, Any] | None = None,
     job_id: str | None = None,
 ) -> PipelineState:
@@ -59,6 +65,8 @@ def create_initial_state(
         video_url: TikTok URL to analyze
         product_description: Description of product to feature
         product_images: Optional product images (base64 or URLs)
+        product_category: Product category for interaction planning
+        interaction_constraints: Optional constraints for interaction planning
         config: Optional configuration overrides
         job_id: Optional job ID (generated if not provided)
 
@@ -75,11 +83,15 @@ def create_initial_state(
         video_url=video_url,
         product_description=product_description,
         product_images=product_images or [],
+        product_category=product_category,
+        interaction_constraints=interaction_constraints or {},
         config=config or {},
         video_path="",
         frames=[],
         video_analysis={},
         ugc_intent={},
+        interaction_plan={},
+        selected_interactions=[],
         video_prompt="",
         suggested_script="",
         generated_video_url="",

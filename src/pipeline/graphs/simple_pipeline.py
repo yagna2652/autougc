@@ -29,6 +29,8 @@ from src.pipeline.nodes.download_video import download_video_node
 from src.pipeline.nodes.extract_frames import extract_frames_node
 from src.pipeline.nodes.generate_prompt import generate_prompt_node
 from src.pipeline.nodes.generate_video import generate_video_node
+from src.pipeline.nodes.plan_interactions import plan_interactions_node
+from src.pipeline.nodes.select_interactions import select_interaction_clips_node
 
 
 def should_continue(state: PipelineState) -> Literal["continue", "end"]:
@@ -44,7 +46,8 @@ def build_pipeline() -> StateGraph:
     Build the simple UGC generation pipeline.
 
     Flow:
-        START → download → extract_frames → analyze → classify_ugc_intent → generate_prompt → generate_video → END
+        START → download → extract_frames → analyze → classify_ugc_intent
+              → plan_interactions → select_interactions → generate_prompt → generate_video → END
 
     Returns:
         Compiled StateGraph ready for execution
@@ -57,6 +60,8 @@ def build_pipeline() -> StateGraph:
     workflow.add_node("extract_frames", extract_frames_node)
     workflow.add_node("analyze_video", analyze_video_node)
     workflow.add_node("classify_ugc_intent", classify_ugc_intent_node)
+    workflow.add_node("plan_interactions", plan_interactions_node)
+    workflow.add_node("select_interactions", select_interaction_clips_node)
     workflow.add_node("generate_prompt", generate_prompt_node)
     workflow.add_node("generate_video", generate_video_node)
 
@@ -93,6 +98,24 @@ def build_pipeline() -> StateGraph:
 
     workflow.add_conditional_edges(
         "classify_ugc_intent",
+        should_continue,
+        {
+            "continue": "plan_interactions",
+            "end": END,
+        },
+    )
+
+    workflow.add_conditional_edges(
+        "plan_interactions",
+        should_continue,
+        {
+            "continue": "select_interactions",
+            "end": END,
+        },
+    )
+
+    workflow.add_conditional_edges(
+        "select_interactions",
         should_continue,
         {
             "continue": "generate_prompt",

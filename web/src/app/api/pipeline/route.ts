@@ -108,6 +108,8 @@ async function handleStatus(body: StatusRequest) {
     error: data.error || null,
     videoAnalysis: data.video_analysis || null,
     ugcIntent: data.ugc_intent || null,
+    interactionPlan: data.interaction_plan || null,
+    selectedInteractions: data.selected_interactions || [],
     videoPrompt: data.video_prompt || "",
     suggestedScript: data.suggested_script || "",
     generatedVideoUrl: data.generated_video_url || "",

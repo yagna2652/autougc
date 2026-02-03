@@ -35,6 +35,8 @@ def generate_prompt_node(state: dict[str, Any]) -> dict[str, Any]:
     video_analysis = state.get("video_analysis", {})
     product_description = state.get("product_description", "")
     product_images = state.get("product_images", [])
+    interaction_plan = state.get("interaction_plan", {})
+    selected_interactions = state.get("selected_interactions", [])
 
     if not video_analysis:
         logger.warning("No video analysis provided")
@@ -64,7 +66,8 @@ def generate_prompt_node(state: dict[str, Any]) -> dict[str, Any]:
     try:
         # Build the prompt generation request
         content = _build_prompt_request(
-            video_analysis, product_description, product_images
+            video_analysis, product_description, product_images,
+            interaction_plan, selected_interactions
         )
 
         # Call Claude
@@ -114,6 +117,8 @@ def _build_prompt_request(
     video_analysis: dict[str, Any],
     product_description: str,
     product_images: list[str],
+    interaction_plan: dict[str, Any],
+    selected_interactions: list[dict[str, Any]],
 ) -> list[dict[str, Any]]:
     """
     Build the content for prompt generation request.
@@ -122,6 +127,8 @@ def _build_prompt_request(
         video_analysis: Analysis from analyze_video node
         product_description: User's product description
         product_images: List of product image URLs or base64
+        interaction_plan: Planned interaction sequence
+        selected_interactions: Selected clips from library
 
     Returns:
         Content array for Claude API
@@ -131,6 +138,9 @@ def _build_prompt_request(
     # Format the video analysis
     analysis_text = _format_analysis(video_analysis)
 
+    # Format interaction plan if available
+    interaction_text = _format_interaction_plan(interaction_plan, selected_interactions)
+
     # Build the main prompt
     prompt = f"""You are an expert at creating prompts for AI video generation models (Sora, Kling, etc.).
 
@@ -139,7 +149,7 @@ I analyzed a TikTok video and extracted this information about its style:
 {analysis_text}
 
 {"Product to feature: " + product_description if product_description else "No specific product - create a general UGC style video."}
-
+{interaction_text}
 Your task: Create a detailed prompt for an AI video generator that will recreate this EXACT style.
 
 CRITICAL REQUIREMENTS FOR REALISM:
@@ -151,11 +161,18 @@ CRITICAL REQUIREMENTS FOR REALISM:
 6. **Expression**: Genuine emotions - NOT acted/performative
 7. **Eye Contact**: Looking at phone screen (like filming themselves) - NOT through the camera
 
+MECHANICS INTEGRITY (for product interactions):
+- Rigid/consistent object shape (no warping)
+- Consistent clicking/interaction motion
+- Plausible hand grip for product size
+- Close-up framing to show interactions clearly
+- Sound emphasis where appropriate
+
 The video should be INDISTINGUISHABLE from a real TikTok filmed by a real person.
 
 Respond in this JSON format:
 {{
-    "video_prompt": "A detailed 150-250 word prompt describing exactly what the AI video generator should create. Be extremely specific about every visual detail to achieve maximum realism.",
+    "video_prompt": "A detailed 150-250 word prompt describing exactly what the AI video generator should create. Be extremely specific about every visual detail to achieve maximum realism. Include the planned interaction sequence.",
     "script": "A short casual script (1-3 sentences) the person might say - written exactly how a real person talks on TikTok"
 }}
 
@@ -184,6 +201,54 @@ Return ONLY valid JSON."""
                 )
 
     return content
+
+
+def _format_interaction_plan(
+    interaction_plan: dict[str, Any],
+    selected_interactions: list[dict[str, Any]],
+) -> str:
+    """
+    Format the interaction plan into prompt text.
+
+    Args:
+        interaction_plan: Planned interaction sequence
+        selected_interactions: Selected clips from library
+
+    Returns:
+        Formatted string for prompt
+    """
+    if not interaction_plan or not interaction_plan.get("sequence"):
+        return ""
+
+    parts = ["\n## INTERACTION SEQUENCE (must follow this sequence):"]
+
+    for i, beat in enumerate(interaction_plan.get("sequence", [])):
+        primitive = beat.get("primitive", "unknown")
+        duration = beat.get("duration_s", 0)
+        framing = beat.get("framing", "close")
+        notes = beat.get("notes", "")
+        audio_emphasis = beat.get("audio_emphasis", False)
+
+        parts.append(f"\nBeat {i+1} ({duration}s): {primitive.replace('_', ' ').title()}")
+        parts.append(f"  - Framing: {framing}")
+        if audio_emphasis:
+            parts.append("  - Audio: Emphasize sound (ASMR-like)")
+        if notes:
+            parts.append(f"  - Direction: {notes}")
+
+        # Add matched clip info if available
+        if selected_interactions and i < len(selected_interactions):
+            selection = selected_interactions[i]
+            if selection.get("match_status") == "matched" and selection.get("clip"):
+                clip = selection["clip"]
+                parts.append(f"  - Reference clip: {clip.get('id')} ({clip.get('duration_s')}s)")
+
+    if interaction_plan.get("key_mechanics_notes"):
+        parts.append(f"\nMechanics notes: {interaction_plan['key_mechanics_notes']}")
+
+    parts.append(f"\nTotal duration: {interaction_plan.get('total_duration_s', 0)}s")
+
+    return "\n".join(parts)
 
 
 def _format_analysis(analysis: dict[str, Any]) -> str:

@@ -30,6 +30,8 @@ interface PipelineResult {
   error: string | null;
   videoAnalysis: Record<string, unknown> | null;
   ugcIntent: Record<string, unknown> | null;
+  interactionPlan: Record<string, unknown> | null;
+  selectedInteractions: Array<Record<string, unknown>>;
   videoPrompt: string;
   suggestedScript: string;
   generatedVideoUrl: string;
@@ -55,6 +57,13 @@ export default function Home() {
   const [ugcIntent, setUgcIntent] = useState<Record<string, unknown> | null>(
     null
   );
+  const [interactionPlan, setInteractionPlan] = useState<Record<
+    string,
+    unknown
+  > | null>(null);
+  const [selectedInteractions, setSelectedInteractions] = useState<
+    Array<Record<string, unknown>>
+  >([]);
   const [videoPrompt, setVideoPrompt] = useState("");
   const [suggestedScript, setSuggestedScript] = useState("");
   const [generatedVideoUrl, setGeneratedVideoUrl] = useState("");
@@ -79,6 +88,8 @@ export default function Home() {
           setStatus("completed");
           setVideoAnalysis(data.videoAnalysis);
           setUgcIntent(data.ugcIntent || null);
+          setInteractionPlan(data.interactionPlan || null);
+          setSelectedInteractions(data.selectedInteractions || []);
           setVideoPrompt(data.videoPrompt);
           setSuggestedScript(data.suggestedScript);
           setGeneratedVideoUrl(data.generatedVideoUrl);
@@ -108,6 +119,8 @@ export default function Home() {
     setError(null);
     setVideoAnalysis(null);
     setUgcIntent(null);
+    setInteractionPlan(null);
+    setSelectedInteractions([]);
     setVideoPrompt("");
     setSuggestedScript("");
     setGeneratedVideoUrl("");
@@ -144,6 +157,8 @@ export default function Home() {
     setJobId(null);
     setVideoAnalysis(null);
     setUgcIntent(null);
+    setInteractionPlan(null);
+    setSelectedInteractions([]);
     setVideoPrompt("");
     setSuggestedScript("");
     setGeneratedVideoUrl("");
@@ -315,11 +330,45 @@ export default function Home() {
               </Card>
             )}
 
+            {/* Interaction Plan */}
+            {interactionPlan && Object.keys(interactionPlan).length > 0 && (
+              <Card className="mb-6">
+                <CardHeader>
+                  <CardTitle>5. Interaction Plan</CardTitle>
+                  <CardDescription>
+                    Planned interaction sequence for the fidget product
+                  </CardDescription>
+                </CardHeader>
+                <CardContent>
+                  <pre className="bg-gray-100 dark:bg-gray-800 p-4 rounded-lg overflow-auto text-sm">
+                    {JSON.stringify(interactionPlan, null, 2)}
+                  </pre>
+                </CardContent>
+              </Card>
+            )}
+
+            {/* Selected Interactions */}
+            {selectedInteractions && selectedInteractions.length > 0 && (
+              <Card className="mb-6">
+                <CardHeader>
+                  <CardTitle>6. Selected Reference Clips</CardTitle>
+                  <CardDescription>
+                    Matched clips from the interaction library
+                  </CardDescription>
+                </CardHeader>
+                <CardContent>
+                  <pre className="bg-gray-100 dark:bg-gray-800 p-4 rounded-lg overflow-auto text-sm">
+                    {JSON.stringify(selectedInteractions, null, 2)}
+                  </pre>
+                </CardContent>
+              </Card>
+            )}
+
             {/* Generated Prompt */}
             {videoPrompt && (
               <Card className="mb-6">
                 <CardHeader>
-                  <CardTitle>5. Generated Video Prompt</CardTitle>
+                  <CardTitle>7. Generated Video Prompt</CardTitle>
                   <CardDescription>
                     The prompt used for video generation
                   </CardDescription>
@@ -344,7 +393,7 @@ export default function Home() {
             {generatedVideoUrl && (
               <Card className="mb-6">
                 <CardHeader>
-                  <CardTitle>6. Generated Video</CardTitle>
+                  <CardTitle>8. Generated Video</CardTitle>
                   <CardDescription>
                     Your UGC-style video is ready!
                   </CardDescription>

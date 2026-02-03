@@ -87,6 +87,14 @@ class StartPipelineRequest(BaseModel):
     product_images: list[str] = Field(
         default_factory=list, description="Product images (base64 or URLs)"
     )
+    product_category: str = Field(
+        default="mechanical_keyboard_keychain",
+        description="Product category for interaction planning",
+    )
+    interaction_constraints: dict[str, Any] = Field(
+        default_factory=dict,
+        description="Optional constraints for interaction planning (e.g., audio_emphasis)",
+    )
     config: Optional[PipelineConfigModel] = Field(
         default=None, description="Pipeline configuration"
     )
@@ -109,6 +117,8 @@ class JobStatusResponse(BaseModel):
     error: str = ""
     video_analysis: Optional[dict[str, Any]] = None
     ugc_intent: dict[str, Any] = {}
+    interaction_plan: dict[str, Any] = {}
+    selected_interactions: list[dict[str, Any]] = []
     video_prompt: str = ""
     suggested_script: str = ""
     generated_video_url: str = ""
@@ -210,6 +220,8 @@ async def start_pipeline(
             video_url=request.video_url,
             product_description=request.product_description,
             product_images=request.product_images,
+            product_category=request.product_category,
+            interaction_constraints=request.interaction_constraints,
             config=config,
             job_id=job_id,
         )
@@ -259,6 +271,8 @@ async def get_job_status(job_id: str):
         error=state.get("error", ""),
         video_analysis=state.get("video_analysis"),
         ugc_intent=state.get("ugc_intent", {}),
+        interaction_plan=state.get("interaction_plan", {}),
+        selected_interactions=state.get("selected_interactions", []),
         video_prompt=state.get("video_prompt", ""),
         suggested_script=state.get("suggested_script", ""),
         generated_video_url=state.get("generated_video_url", ""),
