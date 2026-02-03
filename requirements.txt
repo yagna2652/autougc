@@ -11,6 +11,12 @@ python-dotenv
 rich
 click
 
+# LangGraph & LangChain
+langgraph>=0.2.0
+langchain>=0.3.0
+langchain-anthropic>=0.3.0
+langsmith>=0.2.0
+
 # Development
 pytest
 pytest-asyncio

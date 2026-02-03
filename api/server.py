@@ -1,25 +1,31 @@
 """
-FastAPI server for AutoUGC video analysis backend.
+FastAPI server for AutoUGC video generation.
 
-This server exposes the Python BlueprintGenerator to the Next.js web UI,
-allowing the frontend to analyze TikTok videos and get structured blueprints.
+Simple API that exposes the UGC generation pipeline:
+- POST /api/v1/pipeline/start - Start a pipeline job
+- GET /api/v1/pipeline/jobs/{job_id} - Get job status
+- GET /api/v1/pipeline/health - Health check
 """
 
+from dotenv import load_dotenv
+
+load_dotenv()  # Load environment variables from .env
+
+import uvicorn
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-import uvicorn
 
 app = FastAPI(
-    title="AutoUGC Analyzer API",
-    description="Backend API for TikTok video analysis and blueprint generation",
-    version="1.0.0",
+    title="AutoUGC API",
+    description="Simple UGC video generation from TikTok analysis",
+    version="2.0.0",
 )
 
 # CORS configuration for Next.js dev server
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
-        "http://localhost:3000",  # Next.js dev server
+        "http://localhost:3000",
         "http://127.0.0.1:3000",
     ],
     allow_credentials=True,
@@ -30,11 +36,11 @@ app.add_middleware(
 
 @app.get("/health")
 async def health_check():
-    """Health check endpoint to verify server is running."""
+    """Health check endpoint."""
     return {
         "status": "ok",
-        "service": "AutoUGC Analyzer API",
-        "version": "1.0.0",
+        "service": "AutoUGC API",
+        "version": "2.0.0",
     }
 
 
@@ -42,25 +48,21 @@ async def health_check():
 async def root():
     """Root endpoint with API information."""
     return {
-        "service": "AutoUGC Analyzer API",
+        "service": "AutoUGC API",
+        "version": "2.0.0",
         "endpoints": {
             "health": "/health",
-            "analyze": "POST /api/v1/analyze",
-            "job_status": "GET /api/v1/jobs/{job_id}",
-            "mechanics_generate": "POST /api/v1/mechanics/generate",
-            "mechanics_from_style": "POST /api/v1/mechanics/from-style",
-            "mechanics_enhance": "POST /api/v1/mechanics/enhance",
-            "mechanics_templates": "GET /api/v1/mechanics/templates",
+            "pipeline_start": "POST /api/v1/pipeline/start",
+            "pipeline_job_status": "GET /api/v1/pipeline/jobs/{job_id}",
+            "pipeline_health": "GET /api/v1/pipeline/health",
         },
     }
 
 
-# Import and include routers
-from api.routes import analyze
-from api.routes import mechanics
+# Import and include pipeline router
+from api.routes.pipeline import router as pipeline_router
 
-app.include_router(analyze.router, prefix="/api/v1", tags=["analysis"])
-app.include_router(mechanics.router, prefix="/api/v1", tags=["mechanics"])
+app.include_router(pipeline_router, prefix="/api/v1", tags=["pipeline"])
 
 
 if __name__ == "__main__":

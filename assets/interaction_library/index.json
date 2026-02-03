@@ -1,0 +1,197 @@
+{
+  "version": "1.0.0",
+  "product_category": "mechanical_keyboard_keychain",
+  "description": "Interaction library for fidget/click products (mechanical keyboard keychains)",
+  "clips": [
+    {
+      "id": "mkc_closeup_click_loop_01",
+      "primitive": "closeup_click_loop",
+      "product_category": "mechanical_keyboard_keychain",
+      "file_path": "assets/interaction_library/clips/mkc_closeup_click_loop_01.mp4",
+      "duration_s": 4.2,
+      "framing": "macro_closeup",
+      "audio_quality": "high",
+      "tempo": "fast",
+      "face_visible": false,
+      "dominant_hand": "right",
+      "click_count_range": [4, 8],
+      "tags": ["asmr", "tactile", "fidget"]
+    },
+    {
+      "id": "mkc_closeup_click_loop_02",
+      "primitive": "closeup_click_loop",
+      "product_category": "mechanical_keyboard_keychain",
+      "file_path": "assets/interaction_library/clips/mkc_closeup_click_loop_02.mp4",
+      "duration_s": 3.8,
+      "framing": "close",
+      "audio_quality": "medium",
+      "tempo": "medium",
+      "face_visible": false,
+      "dominant_hand": "left",
+      "click_count_range": [3, 6],
+      "tags": ["tactile", "fidget"]
+    },
+    {
+      "id": "mkc_selfie_click_01",
+      "primitive": "selfie_click_while_talking",
+      "product_category": "mechanical_keyboard_keychain",
+      "file_path": "assets/interaction_library/clips/mkc_selfie_click_01.mp4",
+      "duration_s": 6.5,
+      "framing": "selfie_medium",
+      "audio_quality": "medium",
+      "tempo": "medium",
+      "face_visible": true,
+      "dominant_hand": "right",
+      "click_count_range": [5, 12],
+      "tags": ["talking_head", "casual", "review"]
+    },
+    {
+      "id": "mkc_pocket_pull_01",
+      "primitive": "pocket_pull_and_click",
+      "product_category": "mechanical_keyboard_keychain",
+      "file_path": "assets/interaction_library/clips/mkc_pocket_pull_01.mp4",
+      "duration_s": 4.0,
+      "framing": "close",
+      "audio_quality": "medium",
+      "tempo": "medium",
+      "face_visible": false,
+      "dominant_hand": "right",
+      "click_count_range": [2, 4],
+      "tags": ["reveal", "everyday_carry", "pocket"]
+    },
+    {
+      "id": "mkc_desk_idle_01",
+      "primitive": "desk_idle_click",
+      "product_category": "mechanical_keyboard_keychain",
+      "file_path": "assets/interaction_library/clips/mkc_desk_idle_01.mp4",
+      "duration_s": 5.0,
+      "framing": "desk_topdown",
+      "audio_quality": "high",
+      "tempo": "slow",
+      "face_visible": false,
+      "dominant_hand": "right",
+      "click_count_range": [3, 7],
+      "tags": ["workspace", "productivity", "idle"]
+    },
+    {
+      "id": "mkc_anxiety_relief_01",
+      "primitive": "anxiety_relief_click",
+      "product_category": "mechanical_keyboard_keychain",
+      "file_path": "assets/interaction_library/clips/mkc_anxiety_relief_01.mp4",
+      "duration_s": 4.5,
+      "framing": "close",
+      "audio_quality": "medium",
+      "tempo": "fast",
+      "face_visible": false,
+      "dominant_hand": "right",
+      "click_count_range": [8, 15],
+      "tags": ["stress_relief", "fidget", "anxiety"]
+    },
+    {
+      "id": "mkc_asmr_01",
+      "primitive": "sound_showcase_asmr",
+      "product_category": "mechanical_keyboard_keychain",
+      "file_path": "assets/interaction_library/clips/mkc_asmr_01.mp4",
+      "duration_s": 5.5,
+      "framing": "macro_closeup",
+      "audio_quality": "high",
+      "tempo": "slow",
+      "face_visible": false,
+      "dominant_hand": "right",
+      "click_count_range": [3, 6],
+      "tags": ["asmr", "sound", "tactile", "satisfying"]
+    },
+    {
+      "id": "mkc_asmr_02",
+      "primitive": "sound_showcase_asmr",
+      "product_category": "mechanical_keyboard_keychain",
+      "file_path": "assets/interaction_library/clips/mkc_asmr_02.mp4",
+      "duration_s": 4.8,
+      "framing": "macro_closeup",
+      "audio_quality": "high",
+      "tempo": "medium",
+      "face_visible": false,
+      "dominant_hand": "left",
+      "click_count_range": [4, 8],
+      "tags": ["asmr", "sound", "crispy"]
+    },
+    {
+      "id": "mkc_dangle_click_01",
+      "primitive": "keychain_dangle_then_click",
+      "product_category": "mechanical_keyboard_keychain",
+      "file_path": "assets/interaction_library/clips/mkc_dangle_click_01.mp4",
+      "duration_s": 3.5,
+      "framing": "close",
+      "audio_quality": "medium",
+      "tempo": "medium",
+      "face_visible": false,
+      "dominant_hand": "right",
+      "click_count_range": [2, 4],
+      "tags": ["keychain", "dangle", "reveal"]
+    },
+    {
+      "id": "mkc_compare_clicks_01",
+      "primitive": "compare_clicks_variation",
+      "product_category": "mechanical_keyboard_keychain",
+      "file_path": "assets/interaction_library/clips/mkc_compare_clicks_01.mp4",
+      "duration_s": 6.0,
+      "framing": "macro_closeup",
+      "audio_quality": "high",
+      "tempo": "varied",
+      "face_visible": false,
+      "dominant_hand": "right",
+      "click_count_range": [6, 12],
+      "tags": ["comparison", "variation", "demonstration"]
+    }
+  ],
+  "primitives_registry": {
+    "closeup_click_loop": {
+      "description": "Macro shot of fingers clicking in loop",
+      "ideal_framing": "macro_closeup",
+      "typical_duration_range": [3, 6],
+      "audio_importance": "high"
+    },
+    "selfie_click_while_talking": {
+      "description": "Talking head while casually clicking",
+      "ideal_framing": "selfie_medium",
+      "typical_duration_range": [5, 10],
+      "audio_importance": "medium"
+    },
+    "pocket_pull_and_click": {
+      "description": "Pull from pocket, start clicking",
+      "ideal_framing": "close",
+      "typical_duration_range": [3, 5],
+      "audio_importance": "medium"
+    },
+    "desk_idle_click": {
+      "description": "Top-down desk, clicking while working",
+      "ideal_framing": "desk_topdown",
+      "typical_duration_range": [4, 7],
+      "audio_importance": "medium"
+    },
+    "anxiety_relief_click": {
+      "description": "Stress relief through clicking",
+      "ideal_framing": "close",
+      "typical_duration_range": [3, 6],
+      "audio_importance": "medium"
+    },
+    "sound_showcase_asmr": {
+      "description": "ASMR-style sound focus",
+      "ideal_framing": "macro_closeup",
+      "typical_duration_range": [4, 8],
+      "audio_importance": "critical"
+    },
+    "keychain_dangle_then_click": {
+      "description": "Show dangling, then click",
+      "ideal_framing": "close",
+      "typical_duration_range": [3, 5],
+      "audio_importance": "low"
+    },
+    "compare_clicks_variation": {
+      "description": "Different click styles/speeds",
+      "ideal_framing": "macro_closeup",
+      "typical_duration_range": [5, 8],
+      "audio_importance": "high"
+    }
+  }
+}
