@@ -156,24 +156,37 @@ class TracedMessages:
                     # Calculate latency
                     latency_ms = (time.time() - start_time) * 1000
 
-                    # Extract response data for tracing
-                    # Include token usage at top level for LangSmith cost tracking
+                    # Extract response text
+                    response_text = response.content[0].text if response.content else ""
+
+                    # Calculate cost (Claude Sonnet pricing)
+                    input_tokens = response.usage.input_tokens
+                    output_tokens = response.usage.output_tokens
+                    # Sonnet: $3/1M input, $15/1M output
+                    cost_usd = (input_tokens * 3 / 1_000_000) + (output_tokens * 15 / 1_000_000)
+
+                    # LangSmith expects LangChain-style format for token tracking
                     outputs = {
+                        "generations": [[{"text": response_text}]],
+                        "llm_output": {
+                            "token_usage": {
+                                "prompt_tokens": input_tokens,
+                                "completion_tokens": output_tokens,
+                                "total_tokens": input_tokens + output_tokens,
+                            },
+                            "model_name": response.model,
+                        },
+                        # Also include raw data for debugging
                         "content": [
                             {"type": block.type, "text": getattr(block, "text", None)}
                             for block in response.content
                         ],
-                        "model": response.model,
                         "stop_reason": response.stop_reason,
                         "latency_ms": latency_ms,
-                        # Token usage fields for LangSmith
-                        "input_tokens": response.usage.input_tokens,
-                        "output_tokens": response.usage.output_tokens,
-                        "total_tokens": response.usage.input_tokens + response.usage.output_tokens,
                     }
 
-                    # Update the run with outputs
-                    run.end(outputs=outputs)
+                    # Update the run with outputs and cost metadata
+                    run.end(outputs=outputs, metadata={"cost_usd": cost_usd})
 
                     return response
 
