@@ -7,7 +7,10 @@ Simple node that takes a video prompt and generates a video using Fal.ai
 
 import logging
 import os
+import time
 from typing import Any
+
+from src.tracing import is_tracing_enabled, trace_span
 
 logger = logging.getLogger(__name__)
 
@@ -15,6 +18,12 @@ logger = logging.getLogger(__name__)
 MODEL_ENDPOINTS = {
     "sora": "fal-ai/sora-2/text-to-video",
     "kling": "fal-ai/kling-video/v2.5-turbo/pro/text-to-video",
+}
+
+# Approximate pricing per second (USD)
+MODEL_PRICING_PER_SECOND = {
+    "sora": 0.50,  # ~$0.50/second
+    "kling": 0.10,  # ~$0.10/second
 }
 
 
@@ -71,30 +80,68 @@ def generate_video_node(state: dict[str, Any]) -> dict[str, Any]:
     logger.info(f"Prompt: {video_prompt[:100]}...")
 
     try:
-        # Call Fal.ai API
-        result = _call_fal_api(
-            fal_key=fal_key,
-            endpoint=endpoint,
-            prompt=video_prompt,
-            duration=video_duration,
-            aspect_ratio=aspect_ratio,
-        )
+        # Calculate estimated cost
+        price_per_second = MODEL_PRICING_PER_SECOND.get(video_model, 0.50)
+        estimated_cost_usd = price_per_second * video_duration
 
-        if not result:
-            return {
-                "error": "Video generation failed - no result returned",
-                "current_step": "generation_failed",
-            }
+        # Trace the video generation
+        with trace_span(
+            name="generate_video",
+            run_type="tool",
+            inputs={
+                "prompt": video_prompt[:200] + "..." if len(video_prompt) > 200 else video_prompt,
+                "model": video_model,
+                "duration": video_duration,
+                "aspect_ratio": aspect_ratio,
+            },
+            metadata={
+                "video_model": video_model,
+                "endpoint": endpoint,
+            },
+        ) as span:
+            start_time = time.time()
 
-        video_url = result.get("video", {}).get("url", "")
+            # Call Fal.ai API
+            result = _call_fal_api(
+                fal_key=fal_key,
+                endpoint=endpoint,
+                prompt=video_prompt,
+                duration=video_duration,
+                aspect_ratio=aspect_ratio,
+            )
 
-        if not video_url:
-            return {
-                "error": "Video generation succeeded but no URL returned",
-                "current_step": "generation_failed",
-            }
+            latency_ms = (time.time() - start_time) * 1000
 
-        logger.info(f"Video generated: {video_url}")
+            if not result:
+                span.set_error("Video generation failed - no result returned")
+                return {
+                    "error": "Video generation failed - no result returned",
+                    "current_step": "generation_failed",
+                }
+
+            video_url = result.get("video", {}).get("url", "")
+
+            if not video_url:
+                span.set_error("Video generation succeeded but no URL returned")
+                return {
+                    "error": "Video generation succeeded but no URL returned",
+                    "current_step": "generation_failed",
+                }
+
+            # Set trace outputs with cost
+            span.set_outputs(
+                outputs={
+                    "video_url": video_url,
+                    "duration_seconds": video_duration,
+                    "latency_ms": latency_ms,
+                },
+                metadata={
+                    "cost_usd": estimated_cost_usd,
+                    "price_per_second": price_per_second,
+                },
+            )
+
+            logger.info(f"Video generated: {video_url} (cost: ${estimated_cost_usd:.2f})")
 
         return {
             "generated_video_url": video_url,

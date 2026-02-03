@@ -357,7 +357,7 @@ def trace_span(
         with trace_span("process_video", inputs={"url": video_url}) as span:
             # Your code here
             result = process_video(video_url)
-            span.set_outputs({"frames": len(result.frames)})
+            span.set_outputs({"frames": len(result.frames)}, metadata={"cost_usd": 0.50})
     """
     if is_tracing_enabled() and trace is not None:
         with trace(
@@ -368,8 +368,12 @@ def trace_span(
         ) as run:
             # Create a simple wrapper to allow setting outputs
             class SpanWrapper:
-                def set_outputs(self, outputs: dict[str, Any]) -> None:
-                    run.end(outputs=outputs)
+                def set_outputs(
+                    self,
+                    outputs: dict[str, Any],
+                    metadata: dict[str, Any] | None = None,
+                ) -> None:
+                    run.end(outputs=outputs, metadata=metadata)
 
                 def set_error(self, error: str) -> None:
                     run.end(error=error)
@@ -378,7 +382,11 @@ def trace_span(
     else:
         # No-op wrapper when tracing is disabled
         class NoOpSpan:
-            def set_outputs(self, outputs: dict[str, Any]) -> None:
+            def set_outputs(
+                self,
+                outputs: dict[str, Any],
+                metadata: dict[str, Any] | None = None,
+            ) -> None:
                 pass
 
             def set_error(self, error: str) -> None:
