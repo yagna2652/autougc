@@ -7,7 +7,6 @@ Endpoints:
 - GET /pipeline/health - Health check
 """
 
-import asyncio
 import logging
 import uuid
 from datetime import datetime
@@ -77,19 +76,31 @@ class PipelineConfigModel(BaseModel):
     video_model: str = Field(default="sora", description="Video model (sora or kling)")
     video_duration: int = Field(default=5, description="Video duration in seconds")
     aspect_ratio: str = Field(default="9:16", description="Video aspect ratio")
+    i2v_image_index: int = Field(
+        default=0, description="Which product image to use for I2V (0-indexed)"
+    )
 
 
 class StartPipelineRequest(BaseModel):
-    """Request to start the pipeline."""
+    """Request to start the pipeline.
+
+    Only video_url is required. If product info is not provided,
+    the default product (mechanical keyboard keychain) is loaded
+    automatically from assets/products/keychain/.
+    """
 
     video_url: str = Field(..., description="TikTok/Reel URL to analyze")
-    product_description: str = Field(default="", description="Product description")
-    product_images: list[str] = Field(
-        default_factory=list, description="Product images (base64 or URLs)"
+    product_description: str = Field(
+        default="",
+        description="Product description (auto-loaded from default product if empty)",
     )
-    product_category: str = Field(
-        default="mechanical_keyboard_keychain",
-        description="Product category for interaction planning",
+    product_images: list[str] = Field(
+        default_factory=list,
+        description="Product images as base64 or URLs (auto-loaded if empty)",
+    )
+    product_category: Optional[str] = Field(
+        default=None,
+        description="Product category for interaction planning (auto-detected if not provided)",
     )
     interaction_constraints: dict[str, Any] = Field(
         default_factory=dict,
@@ -121,6 +132,7 @@ class JobStatusResponse(BaseModel):
     selected_interactions: list[dict[str, Any]] = []
     video_prompt: str = ""
     suggested_script: str = ""
+    i2v_image_url: str = ""  # Fal CDN URL used for I2V
     generated_video_url: str = ""
     created_at: str = ""
     updated_at: str = ""
@@ -216,11 +228,12 @@ async def start_pipeline(
             config = request.config.model_dump()
 
         # Create initial state
+        # If product info not provided, create_initial_state will auto-load default
         initial_state = create_initial_state(
             video_url=request.video_url,
             product_description=request.product_description,
             product_images=request.product_images,
-            product_category=request.product_category,
+            product_category=request.product_category,  # None triggers auto-load
             interaction_constraints=request.interaction_constraints,
             config=config,
             job_id=job_id,
@@ -275,6 +288,7 @@ async def get_job_status(job_id: str):
         selected_interactions=state.get("selected_interactions", []),
         video_prompt=state.get("video_prompt", ""),
         suggested_script=state.get("suggested_script", ""),
+        i2v_image_url=state.get("i2v_image_url", ""),
         generated_video_url=state.get("generated_video_url", ""),
         created_at=job.get("created_at", ""),
         updated_at=job.get("updated_at", ""),

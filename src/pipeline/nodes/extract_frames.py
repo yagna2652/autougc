@@ -5,7 +5,6 @@ Simple node that extracts representative frames from a video file
 for subsequent analysis with Claude Vision.
 """
 
-import base64
 import logging
 from pathlib import Path
 from typing import Any

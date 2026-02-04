@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -20,53 +20,82 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-
-type Status = "idle" | "running" | "completed" | "failed";
-
-interface PipelineResult {
-  jobId: string;
-  status: Status;
-  currentStep: string;
-  error: string | null;
-  videoAnalysis: Record<string, unknown> | null;
-  ugcIntent: Record<string, unknown> | null;
-  interactionPlan: Record<string, unknown> | null;
-  selectedInteractions: Array<Record<string, unknown>>;
-  videoPrompt: string;
-  suggestedScript: string;
-  generatedVideoUrl: string;
-}
+import { Upload, X } from "lucide-react";
+import type {
+  PipelineResult,
+  PipelineStatus,
+  VideoAnalysisData,
+  UGCIntentData,
+  InteractionPlanData,
+  SelectedInteraction,
+} from "@/types/pipeline";
 
 export default function Home() {
   // Input state
   const [tiktokUrl, setTiktokUrl] = useState("");
   const [productDescription, setProductDescription] = useState("");
+  const [productImages, setProductImages] = useState<File[]>([]);
+  const [productImagesBase64, setProductImagesBase64] = useState<string[]>([]);
   const [videoModel, setVideoModel] = useState<"sora" | "kling">("sora");
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Pipeline state
-  const [status, setStatus] = useState<Status>("idle");
+  const [status, setStatus] = useState<PipelineStatus>("idle");
   const [currentStep, setCurrentStep] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [jobId, setJobId] = useState<string | null>(null);
 
   // Results
-  const [videoAnalysis, setVideoAnalysis] = useState<Record<
-    string,
-    unknown
-  > | null>(null);
-  const [ugcIntent, setUgcIntent] = useState<Record<string, unknown> | null>(
+  const [videoAnalysis, setVideoAnalysis] = useState<VideoAnalysisData | null>(
     null
   );
-  const [interactionPlan, setInteractionPlan] = useState<Record<
-    string,
-    unknown
-  > | null>(null);
+  const [ugcIntent, setUgcIntent] = useState<UGCIntentData | null>(null);
+  const [interactionPlan, setInteractionPlan] =
+    useState<InteractionPlanData | null>(null);
   const [selectedInteractions, setSelectedInteractions] = useState<
-    Array<Record<string, unknown>>
+    SelectedInteraction[]
   >([]);
   const [videoPrompt, setVideoPrompt] = useState("");
   const [suggestedScript, setSuggestedScript] = useState("");
   const [generatedVideoUrl, setGeneratedVideoUrl] = useState("");
+
+  // Convert file to base64
+  const fileToBase64 = (file: File): Promise<string> => {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.readAsDataURL(file);
+      reader.onload = () => resolve(reader.result as string);
+      reader.onerror = reject;
+    });
+  };
+
+  // Handle file selection
+  const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>): Promise<void> => {
+    const files = Array.from(e.target.files || []);
+    if (files.length === 0) return;
+
+    // Add new files to existing ones
+    const newFiles = [...productImages, ...files];
+    setProductImages(newFiles);
+
+    // Convert all files to base64
+    const base64Promises = newFiles.map(fileToBase64);
+    const base64Results = await Promise.all(base64Promises);
+    setProductImagesBase64(base64Results);
+
+    // Reset the input so the same file can be selected again
+    if (fileInputRef.current) {
+      fileInputRef.current.value = "";
+    }
+  };
+
+  // Remove an image
+  const removeImage = (index: number): void => {
+    const newFiles = productImages.filter((_, i) => i !== index);
+    const newBase64 = productImagesBase64.filter((_, i) => i !== index);
+    setProductImages(newFiles);
+    setProductImagesBase64(newBase64);
+  };
 
   // Poll for job status
   useEffect(() => {
@@ -107,9 +136,14 @@ export default function Home() {
     return () => clearInterval(interval);
   }, [jobId, status]);
 
-  const handleStart = async () => {
+  const handleStart = async (): Promise<void> => {
     if (!tiktokUrl) {
       setError("Please enter a TikTok URL");
+      return;
+    }
+
+    if (productImagesBase64.length === 0) {
+      setError("Please upload at least one product image");
       return;
     }
 
@@ -133,6 +167,7 @@ export default function Home() {
           action: "start",
           videoUrl: tiktokUrl,
           productDescription,
+          productImages: productImagesBase64,
           videoModel,
         }),
       });
@@ -150,11 +185,13 @@ export default function Home() {
     }
   };
 
-  const handleReset = () => {
+  const handleReset = (): void => {
     setStatus("idle");
     setCurrentStep("");
     setError(null);
     setJobId(null);
+    setProductImages([]);
+    setProductImagesBase64([]);
     setVideoAnalysis(null);
     setUgcIntent(null);
     setInteractionPlan(null);
@@ -207,6 +244,67 @@ export default function Home() {
               />
             </div>
             <div>
+              <Label>
+                Product Images <span className="text-red-500">*</span>
+              </Label>
+              <p className="text-sm text-gray-500 mb-2">
+                Upload images of your product (required)
+              </p>
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept="image/*"
+                multiple
+                onChange={handleFileSelect}
+                disabled={status === "running"}
+                className="hidden"
+              />
+              <div
+                onClick={() =>
+                  status !== "running" && fileInputRef.current?.click()
+                }
+                className={`border-2 border-dashed rounded-lg p-6 text-center cursor-pointer transition-colors ${
+                  status === "running"
+                    ? "opacity-50 cursor-not-allowed"
+                    : "hover:border-primary hover:bg-gray-50 dark:hover:bg-gray-800"
+                }`}
+              >
+                <Upload className="mx-auto h-8 w-8 text-gray-400 mb-2" />
+                <p className="text-sm text-gray-600 dark:text-gray-400">
+                  Click to upload or drag and drop
+                </p>
+                <p className="text-xs text-gray-500 mt-1">
+                  PNG, JPG, WEBP up to 10MB each
+                </p>
+              </div>
+              {productImages.length > 0 && (
+                <div className="mt-3 grid grid-cols-4 gap-2">
+                  {productImages.map((file, index) => (
+                    <div key={index} className="relative group">
+                      <img
+                        src={productImagesBase64[index]}
+                        alt={file.name}
+                        className="w-full h-20 object-cover rounded-lg border"
+                      />
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          removeImage(index);
+                        }}
+                        disabled={status === "running"}
+                        className="absolute -top-2 -right-2 bg-red-500 text-white rounded-full p-1 opacity-0 group-hover:opacity-100 transition-opacity disabled:opacity-50"
+                      >
+                        <X className="h-3 w-3" />
+                      </button>
+                      <p className="text-xs text-gray-500 truncate mt-1">
+                        {file.name}
+                      </p>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+            <div>
               <Label htmlFor="video-model">Video Generation Model</Label>
               <Select
                 value={videoModel}
@@ -232,7 +330,11 @@ export default function Home() {
             <div className="flex gap-2">
               <Button
                 onClick={handleStart}
-                disabled={status === "running" || !tiktokUrl}
+                disabled={
+                  status === "running" ||
+                  !tiktokUrl ||
+                  productImagesBase64.length === 0
+                }
                 className="flex-1"
               >
                 {status === "running" ? "Processing..." : "Generate Video"}

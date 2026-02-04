@@ -23,6 +23,7 @@ logger = logging.getLogger(__name__)
 
 
 # Import nodes
+from src.pipeline.nodes.analyze_product import analyze_product_node
 from src.pipeline.nodes.analyze_video import analyze_video_node
 from src.pipeline.nodes.classify_ugc_intent import classify_ugc_intent_node
 from src.pipeline.nodes.download_video import download_video_node
@@ -46,7 +47,7 @@ def build_pipeline() -> StateGraph:
     Build the simple UGC generation pipeline.
 
     Flow:
-        START → download → extract_frames → analyze → classify_ugc_intent
+        START → download → extract_frames → analyze_product → analyze_video → classify_ugc_intent
               → plan_interactions → select_interactions → generate_prompt → generate_video → END
 
     Returns:
@@ -58,6 +59,7 @@ def build_pipeline() -> StateGraph:
     # Add nodes
     workflow.add_node("download_video", download_video_node)
     workflow.add_node("extract_frames", extract_frames_node)
+    workflow.add_node("analyze_product", analyze_product_node)
     workflow.add_node("analyze_video", analyze_video_node)
     workflow.add_node("classify_ugc_intent", classify_ugc_intent_node)
     workflow.add_node("plan_interactions", plan_interactions_node)
@@ -80,6 +82,15 @@ def build_pipeline() -> StateGraph:
 
     workflow.add_conditional_edges(
         "extract_frames",
+        should_continue,
+        {
+            "continue": "analyze_product",
+            "end": END,
+        },
+    )
+
+    workflow.add_conditional_edges(
+        "analyze_product",
         should_continue,
         {
             "continue": "analyze_video",

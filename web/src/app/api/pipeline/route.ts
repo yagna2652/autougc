@@ -7,23 +7,18 @@
  */
 
 import { NextRequest, NextResponse } from "next/server";
+import type {
+  StartPipelineRequest,
+  StatusPipelineRequest,
+  PipelineRequest,
+  PipelineResult,
+  VideoAnalysisData,
+  UGCIntentData,
+  InteractionPlanData,
+  SelectedInteraction,
+} from "@/types/pipeline";
 
 const PYTHON_API_URL = process.env.PYTHON_API_URL || "http://localhost:8000";
-
-interface StartRequest {
-  action: "start";
-  videoUrl: string;
-  productDescription?: string;
-  productImages?: string[];
-  videoModel?: "sora" | "kling";
-}
-
-interface StatusRequest {
-  action: "status";
-  jobId: string;
-}
-
-type PipelineRequest = StartRequest | StatusRequest;
 
 export async function POST(request: NextRequest) {
   try {
@@ -49,7 +44,9 @@ export async function POST(request: NextRequest) {
   }
 }
 
-async function handleStart(body: StartRequest) {
+async function handleStart(
+  body: StartPipelineRequest
+): Promise<NextResponse> {
   const requestBody = {
     video_url: body.videoUrl,
     product_description: body.productDescription || "",
@@ -73,7 +70,7 @@ async function handleStart(body: StartRequest) {
     console.error("Pipeline start failed:", data);
     return NextResponse.json(
       { error: data.detail || "Failed to start pipeline" },
-      { status: response.status },
+      { status: response.status }
     );
   }
 
@@ -85,10 +82,12 @@ async function handleStart(body: StartRequest) {
   });
 }
 
-async function handleStatus(body: StatusRequest) {
+async function handleStatus(
+  body: StatusPipelineRequest
+): Promise<NextResponse> {
   const response = await fetch(
     `${PYTHON_API_URL}/api/v1/pipeline/jobs/${body.jobId}`,
-    { method: "GET" },
+    { method: "GET" }
   );
 
   const data = await response.json();
@@ -96,27 +95,32 @@ async function handleStatus(body: StatusRequest) {
   if (!response.ok) {
     return NextResponse.json(
       { error: data.detail || "Failed to get job status" },
-      { status: response.status },
+      { status: response.status }
     );
   }
 
-  return NextResponse.json({
+  // Map Python snake_case response to TypeScript camelCase with proper types
+  const result: Partial<PipelineResult> & { success: boolean } = {
     success: true,
     jobId: data.job_id,
     status: data.status,
     currentStep: data.current_step || "",
     error: data.error || null,
-    videoAnalysis: data.video_analysis || null,
-    ugcIntent: data.ugc_intent || null,
-    interactionPlan: data.interaction_plan || null,
-    selectedInteractions: data.selected_interactions || [],
+    videoAnalysis: (data.video_analysis || null) as VideoAnalysisData | null,
+    ugcIntent: (data.ugc_intent || null) as UGCIntentData | null,
+    interactionPlan: (data.interaction_plan ||
+      null) as InteractionPlanData | null,
+    selectedInteractions: (data.selected_interactions ||
+      []) as SelectedInteraction[],
     videoPrompt: data.video_prompt || "",
     suggestedScript: data.suggested_script || "",
     generatedVideoUrl: data.generated_video_url || "",
-  });
+  };
+
+  return NextResponse.json(result);
 }
 
-export async function GET() {
+export async function GET(): Promise<NextResponse> {
   try {
     const response = await fetch(`${PYTHON_API_URL}/api/v1/pipeline/health`);
     const data = await response.json();

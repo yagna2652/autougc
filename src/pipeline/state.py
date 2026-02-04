@@ -9,7 +9,23 @@ Minimal state that flows through the pipeline:
 5. Generate video
 """
 
-from typing import Any, TypedDict
+import logging
+from typing import Literal, TypedDict
+
+from src.pipeline.types import (
+    InteractionConstraints,
+    InteractionPlanData,
+    PipelineConfig,
+    ProductVisualFeatures,
+    SelectedInteraction,
+    UGCIntentData,
+    VideoAnalysisData,
+)
+
+logger = logging.getLogger(__name__)
+
+# Status type for pipeline state
+PipelineStatus = Literal["pending", "running", "completed", "failed"]
 
 
 class PipelineState(TypedDict, total=False):
@@ -21,7 +37,7 @@ class PipelineState(TypedDict, total=False):
 
     # Job tracking
     job_id: str
-    status: str  # pending, running, completed, failed
+    status: PipelineStatus
     current_step: str
     error: str
 
@@ -30,20 +46,27 @@ class PipelineState(TypedDict, total=False):
     product_description: str
     product_images: list[str]  # base64 or URLs
     product_category: str  # e.g., 'mechanical_keyboard_keychain'
-    interaction_constraints: dict[str, Any]  # Optional constraints for interaction planning
+    interaction_constraints: InteractionConstraints
 
     # Config
-    config: dict[str, Any]
+    config: PipelineConfig
+
+    # Product analysis (from analyze_product node)
+    enhanced_product_description: str  # Vision-generated detailed description
+    product_visual_features: ProductVisualFeatures  # Structured visual analysis
 
     # Pipeline data (populated as we go)
     video_path: str  # Downloaded video file path
     frames: list[str]  # List of extracted frame paths
-    video_analysis: dict[str, Any]  # Claude Vision analysis
-    ugc_intent: dict[str, Any]  # UGC classification results
-    interaction_plan: dict[str, Any]  # Planned interaction sequence
-    selected_interactions: list[dict[str, Any]]  # Selected clips for each beat
+    video_analysis: VideoAnalysisData  # Claude Vision analysis
+    ugc_intent: UGCIntentData  # UGC classification results
+    interaction_plan: InteractionPlanData  # Planned interaction sequence
+    selected_interactions: list[SelectedInteraction]  # Selected clips for each beat
     video_prompt: str  # Generated prompt for video API
     suggested_script: str  # Suggested script/voiceover
+
+    # I2V (Image-to-Video)
+    i2v_image_url: str  # Fal CDN URL of uploaded product image
 
     # Output
     generated_video_url: str  # Final video URL
@@ -53,9 +76,9 @@ def create_initial_state(
     video_url: str,
     product_description: str = "",
     product_images: list[str] | None = None,
-    product_category: str = "mechanical_keyboard_keychain",
-    interaction_constraints: dict[str, Any] | None = None,
-    config: dict[str, Any] | None = None,
+    product_category: str | None = None,
+    interaction_constraints: InteractionConstraints | None = None,
+    config: PipelineConfig | None = None,
     job_id: str | None = None,
 ) -> PipelineState:
     """
@@ -64,7 +87,7 @@ def create_initial_state(
     Args:
         video_url: TikTok URL to analyze
         product_description: Description of product to feature
-        product_images: Optional product images (base64 or URLs)
+        product_images: Product images (required) - base64 or URLs
         product_category: Product category for interaction planning
         interaction_constraints: Optional constraints for interaction planning
         config: Optional configuration overrides
@@ -72,8 +95,15 @@ def create_initial_state(
 
     Returns:
         Initial PipelineState
+
+    Raises:
+        ValueError: If product_images is empty or not provided
     """
     import uuid
+
+    # Validate required product images
+    if not product_images:
+        raise ValueError("Product images are required for video generation")
 
     return PipelineState(
         job_id=job_id or str(uuid.uuid4()),
@@ -82,10 +112,12 @@ def create_initial_state(
         error="",
         video_url=video_url,
         product_description=product_description,
-        product_images=product_images or [],
-        product_category=product_category,
+        product_images=product_images,
+        product_category=product_category or "mechanical_keyboard_keychain",
         interaction_constraints=interaction_constraints or {},
         config=config or {},
+        enhanced_product_description="",
+        product_visual_features={},
         video_path="",
         frames=[],
         video_analysis={},
@@ -94,6 +126,7 @@ def create_initial_state(
         selected_interactions=[],
         video_prompt="",
         suggested_script="",
+        i2v_image_url="",
         generated_video_url="",
     )
 
@@ -105,4 +138,5 @@ DEFAULT_CONFIG = {
     "video_model": "sora",  # sora or kling
     "video_duration": 5,
     "aspect_ratio": "9:16",
+    "i2v_image_index": 0,  # Which product image to use for I2V (0-indexed)
 }

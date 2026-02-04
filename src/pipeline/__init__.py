@@ -11,9 +11,9 @@ A minimal pipeline that:
 Usage:
     from src.pipeline import create_initial_state, run_pipeline
 
+    # Just provide a TikTok URL - product auto-loads from assets/products/keychain/
     state = create_initial_state(
         video_url="https://tiktok.com/...",
-        product_description="My awesome product",
     )
 
     result = run_pipeline(state)
@@ -29,10 +29,28 @@ from src.pipeline.graphs.simple_pipeline import (
     run_pipeline_async,
     stream_pipeline,
 )
+from src.pipeline.product_loader import (
+    get_available_products,
+    load_default_product,
+    load_product,
+)
 from src.pipeline.state import (
     DEFAULT_CONFIG,
     PipelineState,
     create_initial_state,
+)
+from src.pipeline.types import (
+    CameraInfo,
+    InteractionBeat,
+    InteractionClip,
+    InteractionConstraints,
+    InteractionPlanData,
+    PersonInfo,
+    PipelineConfig,
+    ProductVisualFeatures,
+    SelectedInteraction,
+    UGCIntentData,
+    VideoAnalysisData,
 )
 
 __all__ = [
@@ -40,6 +58,22 @@ __all__ = [
     "PipelineState",
     "create_initial_state",
     "DEFAULT_CONFIG",
+    # Types
+    "VideoAnalysisData",
+    "CameraInfo",
+    "PersonInfo",
+    "UGCIntentData",
+    "InteractionPlanData",
+    "InteractionBeat",
+    "InteractionClip",
+    "SelectedInteraction",
+    "ProductVisualFeatures",
+    "PipelineConfig",
+    "InteractionConstraints",
+    # Product loader
+    "load_product",
+    "load_default_product",
+    "get_available_products",
     # Pipeline
     "build_pipeline",
     "get_pipeline",

@@ -1,8 +1,10 @@
 """
-Generate Video Node - Calls video generation APIs to create the final video.
+Generate Video Node - Calls I2V (image-to-video) APIs to create the final video.
 
-Simple node that takes a video prompt and generates a video using Fal.ai
-(Sora or Kling models).
+Uses product images as the starting frame - the video model is conditioned
+on the actual product image, not just a text description.
+
+Requires product images - there is no T2V fallback.
 """
 
 import logging
@@ -10,34 +12,39 @@ import os
 import time
 from typing import Any
 
+from src.pipeline.utils import upload_image_to_fal
 from src.tracing import is_tracing_enabled, trace_span
 
 logger = logging.getLogger(__name__)
 
-# Model endpoints on Fal.ai
+# Model endpoints on Fal.ai (Image-to-Video)
 MODEL_ENDPOINTS = {
-    "sora": "fal-ai/sora-2/text-to-video",
-    "kling": "fal-ai/kling-video/v2.5-turbo/pro/text-to-video",
+    "sora": "fal-ai/sora-2/image-to-video/pro",
+    "kling": "fal-ai/kling-video/v2.1/pro/image-to-video",
 }
 
-# Approximate pricing per second (USD)
+# Approximate pricing per second (USD) for I2V
 MODEL_PRICING_PER_SECOND = {
-    "sora": 0.50,  # ~$0.50/second
-    "kling": 0.10,  # ~$0.10/second
+    "sora": 0.50,  # ~$0.50/second (verify actual I2V pricing)
+    "kling": 0.12,  # ~$0.12/second (verify actual I2V pricing)
 }
 
 
 def generate_video_node(state: dict[str, Any]) -> dict[str, Any]:
     """
-    Generate video using Fal.ai API (Sora or Kling).
+    Generate video using Fal.ai I2V API (Sora or Kling).
+
+    Requires product_images - uploads the selected image to Fal CDN
+    and uses it as the starting frame for video generation.
 
     Args:
-        state: Pipeline state with 'video_prompt'
+        state: Pipeline state with 'video_prompt' and 'product_images'
 
     Returns:
-        State update with 'generated_video_url' or 'error'
+        State update with 'generated_video_url', 'i2v_image_url', or 'error'
     """
     video_prompt = state.get("video_prompt", "")
+    product_images = state.get("product_images", [])
 
     if not video_prompt:
         return {
@@ -45,7 +52,14 @@ def generate_video_node(state: dict[str, Any]) -> dict[str, Any]:
             "current_step": "generation_failed",
         }
 
-    logger.info("Starting video generation")
+    # Product images are REQUIRED for I2V
+    if not product_images:
+        return {
+            "error": "Product images required for video generation. I2V pipeline needs an image as starting frame.",
+            "current_step": "generation_failed",
+        }
+
+    logger.info("Starting I2V video generation")
 
     # Check for FAL_KEY
     fal_key = os.getenv("FAL_KEY")
@@ -60,6 +74,28 @@ def generate_video_node(state: dict[str, Any]) -> dict[str, Any]:
     video_model = config.get("video_model", "sora")
     video_duration = config.get("video_duration", 5)
     aspect_ratio = config.get("aspect_ratio", "9:16")
+    i2v_image_index = config.get("i2v_image_index", 0)
+
+    # Validate image index
+    if i2v_image_index >= len(product_images):
+        logger.warning(
+            f"i2v_image_index {i2v_image_index} out of range, using index 0"
+        )
+        i2v_image_index = 0
+
+    # Upload product image to Fal CDN
+    selected_image = product_images[i2v_image_index]
+    logger.info(f"Uploading product image {i2v_image_index} to Fal CDN")
+
+    i2v_image_url = upload_image_to_fal(selected_image, fal_key)
+
+    if not i2v_image_url:
+        return {
+            "error": "Failed to upload product image to Fal CDN. Cannot proceed with I2V generation.",
+            "current_step": "generation_failed",
+        }
+
+    logger.info(f"Product image uploaded: {i2v_image_url}")
 
     # Sora 2 only supports 4, 8, or 12 second durations
     if "sora" in video_model:
@@ -77,140 +113,165 @@ def generate_video_node(state: dict[str, Any]) -> dict[str, Any]:
     endpoint = MODEL_ENDPOINTS.get(video_model, MODEL_ENDPOINTS["sora"])
 
     logger.info(f"Using model: {video_model} ({endpoint})")
+    logger.info(f"I2V image: {i2v_image_url}")
     logger.info(f"Prompt: {video_prompt[:100]}...")
 
-    try:
-        # Calculate estimated cost
-        price_per_second = MODEL_PRICING_PER_SECOND.get(video_model, 0.50)
-        estimated_cost_usd = price_per_second * video_duration
+    # Calculate estimated cost
+    price_per_second = MODEL_PRICING_PER_SECOND.get(video_model, 0.50)
+    estimated_cost_usd = price_per_second * video_duration
 
-        # Trace the video generation
-        with trace_span(
-            name="generate_video",
-            run_type="tool",
-            inputs={
-                "prompt": video_prompt[:200] + "..." if len(video_prompt) > 200 else video_prompt,
-                "model": video_model,
-                "duration": video_duration,
-                "aspect_ratio": aspect_ratio,
-            },
-            metadata={
-                "video_model": video_model,
-                "endpoint": endpoint,
-            },
-        ) as span:
-            start_time = time.time()
+    # Trace the video generation
+    with trace_span(
+        name="generate_video",
+        run_type="tool",
+        inputs={
+            "prompt": video_prompt[:200] + "..." if len(video_prompt) > 200 else video_prompt,
+            "image_url": i2v_image_url,
+            "model": video_model,
+            "duration": video_duration,
+            "aspect_ratio": aspect_ratio,
+        },
+        metadata={
+            "video_model": video_model,
+            "endpoint": endpoint,
+            "mode": "i2v",
+        },
+    ) as span:
+        start_time = time.time()
 
-            # Call Fal.ai API
+        try:
+            # Call Fal.ai I2V API
             result = _call_fal_api(
                 fal_key=fal_key,
                 endpoint=endpoint,
+                image_url=i2v_image_url,
                 prompt=video_prompt,
                 duration=video_duration,
                 aspect_ratio=aspect_ratio,
             )
+        except FalApiError as e:
+            error_msg = f"Fal.ai API error: {str(e)}"
+            logger.error(error_msg)
+            span.set_error(error_msg)
+            return {
+                "error": error_msg,
+                "current_step": "generation_failed",
+                "i2v_image_url": i2v_image_url,
+            }
+        except Exception as e:
+            error_msg = f"Video generation failed: {str(e)}"
+            logger.exception(error_msg)
+            span.set_error(error_msg)
+            return {
+                "error": error_msg,
+                "current_step": "generation_failed",
+                "i2v_image_url": i2v_image_url,
+            }
 
-            latency_ms = (time.time() - start_time) * 1000
+        latency_ms = (time.time() - start_time) * 1000
 
-            if not result:
-                span.set_error("Video generation failed - no result returned")
-                return {
-                    "error": "Video generation failed - no result returned",
-                    "current_step": "generation_failed",
-                }
+        video_url = result.get("video", {}).get("url", "")
 
-            video_url = result.get("video", {}).get("url", "")
+        if not video_url:
+            error_msg = f"Video generation succeeded but no URL in response. Result: {result}"
+            logger.error(error_msg)
+            span.set_error(error_msg)
+            return {
+                "error": "Video generation succeeded but no URL returned",
+                "current_step": "generation_failed",
+                "i2v_image_url": i2v_image_url,
+            }
 
-            if not video_url:
-                span.set_error("Video generation succeeded but no URL returned")
-                return {
-                    "error": "Video generation succeeded but no URL returned",
-                    "current_step": "generation_failed",
-                }
+        # Set trace outputs with cost
+        span.set_outputs(
+            outputs={
+                "video_url": video_url,
+                "i2v_image_url": i2v_image_url,
+                "duration_seconds": video_duration,
+                "latency_ms": latency_ms,
+            },
+            metadata={
+                "cost_usd": estimated_cost_usd,
+                "price_per_second": price_per_second,
+            },
+        )
 
-            # Set trace outputs with cost
-            span.set_outputs(
-                outputs={
-                    "video_url": video_url,
-                    "duration_seconds": video_duration,
-                    "latency_ms": latency_ms,
-                },
-                metadata={
-                    "cost_usd": estimated_cost_usd,
-                    "price_per_second": price_per_second,
-                },
-            )
+        logger.info(f"Video generated: {video_url} (cost: ${estimated_cost_usd:.2f})")
 
-            logger.info(f"Video generated: {video_url} (cost: ${estimated_cost_usd:.2f})")
+    return {
+        "generated_video_url": video_url,
+        "i2v_image_url": i2v_image_url,
+        "current_step": "video_generated",
+    }
 
-        return {
-            "generated_video_url": video_url,
-            "current_step": "video_generated",
-        }
 
-    except Exception as e:
-        logger.exception("Error generating video")
-        return {
-            "error": f"Video generation failed: {str(e)}",
-            "current_step": "generation_failed",
-        }
+class FalApiError(Exception):
+    """Custom exception for Fal.ai API errors."""
+    pass
 
 
 def _call_fal_api(
     fal_key: str,
     endpoint: str,
+    image_url: str,
     prompt: str,
     duration: int,
     aspect_ratio: str,
-) -> dict[str, Any] | None:
+) -> dict[str, Any]:
     """
-    Call Fal.ai API to generate video.
+    Call Fal.ai I2V API to generate video from image.
 
     Args:
         fal_key: Fal.ai API key
         endpoint: API endpoint
-        prompt: Video generation prompt
+        image_url: Fal CDN URL of the starting image
+        prompt: Video generation prompt (motion description)
         duration: Video duration in seconds
         aspect_ratio: Aspect ratio (e.g., "9:16")
 
     Returns:
-        API result or None on failure
+        API result
+
+    Raises:
+        FalApiError: If the API call fails
     """
     try:
         import fal_client
-
-        # Set the API key in environment (fal_client reads from FAL_KEY)
-        os.environ["FAL_KEY"] = fal_key
-
-        logger.info(f"Calling Fal.ai: {endpoint}")
-
-        # Build API input based on model
-        if "kling" in endpoint:
-            api_input = {
-                "prompt": prompt,
-                "duration": str(duration),
-                "aspect_ratio": aspect_ratio,
-            }
-        else:
-            # Sora 2 format - duration must be 4, 8, or 12
-            api_input = {
-                "prompt": prompt,
-                "duration": duration,  # Already validated/adjusted above
-                "aspect_ratio": aspect_ratio,
-            }
-
-        # Call API and wait for result
-        result = fal_client.subscribe(
-            endpoint,
-            arguments=api_input,
-            with_logs=True,
-        )
-
-        return result
-
     except ImportError:
-        logger.error("fal_client not installed. Run: pip install fal-client")
-        return None
-    except Exception as e:
-        logger.error(f"Fal.ai API error: {e}")
-        return None
+        raise FalApiError("fal_client not installed. Run: pip install fal-client")
+
+    # Set the API key in environment (fal_client reads from FAL_KEY)
+    os.environ["FAL_KEY"] = fal_key
+
+    logger.info(f"Calling Fal.ai I2V: {endpoint}")
+
+    # Build API input based on model (both use image_url for I2V)
+    if "kling" in endpoint:
+        api_input = {
+            "prompt": prompt,
+            "image_url": image_url,
+            "duration": str(duration),
+            "aspect_ratio": aspect_ratio,
+        }
+    else:
+        # Sora 2 I2V format
+        api_input = {
+            "prompt": prompt,
+            "image_url": image_url,
+            "duration": duration,  # Already validated/adjusted above
+            "aspect_ratio": aspect_ratio,
+        }
+
+    logger.info(f"API input: {api_input}")
+
+    # Call API and wait for result
+    result = fal_client.subscribe(
+        endpoint,
+        arguments=api_input,
+        with_logs=True,
+    )
+
+    if not result:
+        raise FalApiError("Fal.ai returned empty result")
+
+    return result
