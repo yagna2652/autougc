@@ -4,11 +4,14 @@ Video downloader for TikTok URLs using yt-dlp.
 Downloads TikTok videos to a temporary directory for analysis.
 """
 
+import logging
 import tempfile
 from pathlib import Path
 from typing import Optional
 
 import yt_dlp
+
+logger = logging.getLogger(__name__)
 
 
 class VideoDownloader:
@@ -94,14 +97,24 @@ def download_video(url: str) -> dict:
     Returns:
         Dict with 'success', 'path', and optionally 'error' keys
     """
+    logger.info(f"    ↳ URL: {url}")
+    logger.info(f"    ↳ Starting yt-dlp download...")
+
     try:
         downloader = VideoDownloader()
         video_path = downloader.download(url)
+
+        # Get file size for logging
+        file_size_mb = Path(video_path).stat().st_size / (1024 * 1024)
+        logger.info(f"    ↳ Download complete: {video_path}")
+        logger.info(f"    ↳ File size: {file_size_mb:.2f} MB")
+
         return {
             "success": True,
             "path": str(video_path),
         }
     except Exception as e:
+        logger.error(f"    ↳ Download failed: {str(e)}")
         return {
             "success": False,
             "error": str(e),

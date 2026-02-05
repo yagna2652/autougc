@@ -13,7 +13,8 @@ All steps are traced via LangSmith for observability.
 """
 
 import logging
-from typing import Literal
+from functools import wraps
+from typing import Any, Callable, Literal
 
 from langgraph.graph import END, START, StateGraph
 
@@ -23,6 +24,7 @@ logger = logging.getLogger(__name__)
 
 
 # Import nodes
+from src.pipeline.nodes.analyze_product import analyze_product_node
 from src.pipeline.nodes.analyze_video import analyze_video_node
 from src.pipeline.nodes.classify_ugc_intent import classify_ugc_intent_node
 from src.pipeline.nodes.download_video import download_video_node
@@ -31,6 +33,37 @@ from src.pipeline.nodes.generate_prompt import generate_prompt_node
 from src.pipeline.nodes.generate_video import generate_video_node
 from src.pipeline.nodes.plan_interactions import plan_interactions_node
 from src.pipeline.nodes.select_interactions import select_interaction_clips_node
+
+
+# Human-readable descriptions for logging
+NODE_DESCRIPTIONS = {
+    "download_video": "Downloading TikTok video",
+    "extract_frames": "Extracting key frames from video",
+    "analyze_product": "Analyzing product images with Claude Vision",
+    "analyze_video": "Analyzing video style with Claude Vision",
+    "classify_ugc_intent": "Classifying UGC intent and archetype",
+    "plan_interactions": "Planning product interactions",
+    "select_interactions": "Selecting best interaction clips",
+    "generate_prompt": "Generating video prompt",
+    "generate_video": "Generating video (this takes 2-5 minutes)",
+}
+
+
+def with_logging(node_name: str, node_func: Callable) -> Callable:
+    """Wrap a node function with start/end logging."""
+
+    @wraps(node_func)
+    def wrapper(state: dict[str, Any]) -> dict[str, Any]:
+        desc = NODE_DESCRIPTIONS.get(node_name, node_name)
+        logger.info(f"▶ STARTING: {desc}...")
+        result = node_func(state)
+        if result.get("error"):
+            logger.error(f"✗ FAILED: {desc} - {result.get('error')}")
+        else:
+            logger.info(f"✓ DONE: {desc}")
+        return result
+
+    return wrapper
 
 
 def should_continue(state: PipelineState) -> Literal["continue", "end"]:
@@ -46,7 +79,7 @@ def build_pipeline() -> StateGraph:
     Build the simple UGC generation pipeline.
 
     Flow:
-        START → download → extract_frames → analyze → classify_ugc_intent
+        START → download → extract_frames → analyze_product → analyze_video → classify_ugc_intent
               → plan_interactions → select_interactions → generate_prompt → generate_video → END
 
     Returns:
@@ -55,15 +88,16 @@ def build_pipeline() -> StateGraph:
     # Create the graph
     workflow = StateGraph(PipelineState)
 
-    # Add nodes
-    workflow.add_node("download_video", download_video_node)
-    workflow.add_node("extract_frames", extract_frames_node)
-    workflow.add_node("analyze_video", analyze_video_node)
-    workflow.add_node("classify_ugc_intent", classify_ugc_intent_node)
-    workflow.add_node("plan_interactions", plan_interactions_node)
-    workflow.add_node("select_interactions", select_interaction_clips_node)
-    workflow.add_node("generate_prompt", generate_prompt_node)
-    workflow.add_node("generate_video", generate_video_node)
+    # Add nodes with logging wrappers
+    workflow.add_node("download_video", with_logging("download_video", download_video_node))
+    workflow.add_node("extract_frames", with_logging("extract_frames", extract_frames_node))
+    workflow.add_node("analyze_product", with_logging("analyze_product", analyze_product_node))
+    workflow.add_node("analyze_video", with_logging("analyze_video", analyze_video_node))
+    workflow.add_node("classify_ugc_intent", with_logging("classify_ugc_intent", classify_ugc_intent_node))
+    workflow.add_node("plan_interactions", with_logging("plan_interactions", plan_interactions_node))
+    workflow.add_node("select_interactions", with_logging("select_interactions", select_interaction_clips_node))
+    workflow.add_node("generate_prompt", with_logging("generate_prompt", generate_prompt_node))
+    workflow.add_node("generate_video", with_logging("generate_video", generate_video_node))
 
     # Define the flow
     workflow.add_edge(START, "download_video")
@@ -80,6 +114,15 @@ def build_pipeline() -> StateGraph:
 
     workflow.add_conditional_edges(
         "extract_frames",
+        should_continue,
+        {
+            "continue": "analyze_product",
+            "end": END,
+        },
+    )
+
+    workflow.add_conditional_edges(
+        "analyze_product",
         should_continue,
         {
             "continue": "analyze_video",

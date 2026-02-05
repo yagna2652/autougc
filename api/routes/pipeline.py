@@ -7,7 +7,6 @@ Endpoints:
 - GET /pipeline/health - Health check
 """
 
-import asyncio
 import logging
 import uuid
 from datetime import datetime
@@ -77,19 +76,31 @@ class PipelineConfigModel(BaseModel):
     video_model: str = Field(default="sora", description="Video model (sora or kling)")
     video_duration: int = Field(default=5, description="Video duration in seconds")
     aspect_ratio: str = Field(default="9:16", description="Video aspect ratio")
+    i2v_image_index: int = Field(
+        default=0, description="Which product image to use for I2V (0-indexed)"
+    )
 
 
 class StartPipelineRequest(BaseModel):
-    """Request to start the pipeline."""
+    """Request to start the pipeline.
+
+    Only video_url is required. If product info is not provided,
+    the default product (mechanical keyboard keychain) is loaded
+    automatically from assets/products/keychain/.
+    """
 
     video_url: str = Field(..., description="TikTok/Reel URL to analyze")
-    product_description: str = Field(default="", description="Product description")
-    product_images: list[str] = Field(
-        default_factory=list, description="Product images (base64 or URLs)"
+    product_description: str = Field(
+        default="",
+        description="Product description (auto-loaded from default product if empty)",
     )
-    product_category: str = Field(
-        default="mechanical_keyboard_keychain",
-        description="Product category for interaction planning",
+    product_images: list[str] = Field(
+        default_factory=list,
+        description="Product images as base64 or URLs (auto-loaded if empty)",
+    )
+    product_category: Optional[str] = Field(
+        default=None,
+        description="Product category for interaction planning (auto-detected if not provided)",
     )
     interaction_constraints: dict[str, Any] = Field(
         default_factory=dict,
@@ -121,6 +132,7 @@ class JobStatusResponse(BaseModel):
     selected_interactions: list[dict[str, Any]] = []
     video_prompt: str = ""
     suggested_script: str = ""
+    i2v_image_url: str = ""  # Fal CDN URL used for I2V
     generated_video_url: str = ""
     created_at: str = ""
     updated_at: str = ""
@@ -129,6 +141,20 @@ class JobStatusResponse(BaseModel):
 # =============================================================================
 # BACKGROUND TASKS
 # =============================================================================
+
+
+# Human-readable descriptions for each pipeline step
+STEP_DESCRIPTIONS = {
+    "download_video": "Downloading TikTok video...",
+    "extract_frames": "Extracting key frames from video...",
+    "analyze_product": "Analyzing product images with Claude Vision...",
+    "analyze_video": "Analyzing video style with Claude Vision...",
+    "classify_ugc_intent": "Classifying UGC intent and archetype...",
+    "plan_interactions": "Planning product interactions for video...",
+    "select_interactions": "Selecting best interaction clips...",
+    "generate_prompt": "Generating video prompt with Claude...",
+    "generate_video": "Generating video with AI (this may take 2-5 minutes)...",
+}
 
 
 async def run_pipeline_async(job_id: str, initial_state: dict[str, Any]) -> None:
@@ -142,25 +168,73 @@ async def run_pipeline_async(job_id: str, initial_state: dict[str, Any]) -> None
     from src.pipeline import stream_pipeline
 
     try:
-        logger.info(f"Starting pipeline for job {job_id}")
+        logger.info(f"{'='*60}")
+        logger.info(f"PIPELINE STARTED | Job: {job_id[:8]}...")
+        logger.info(f"{'='*60}")
 
         # Update status to running
         job_store.update(job_id, {"status": "running"})
 
+        step_count = 0
+        total_steps = len(STEP_DESCRIPTIONS)
+
         # Stream through the pipeline
         for node_name, state_update in stream_pipeline(initial_state):
-            logger.info(f"Job {job_id}: {node_name} completed")
+            step_count += 1
+            step_desc = STEP_DESCRIPTIONS.get(node_name, node_name)
+
+            # Log completion with step number
+            logger.info(f"")
+            logger.info(f"[{step_count}/{total_steps}] ✓ {node_name} COMPLETED")
+
+            # Log any interesting details from the state update
+            if node_name == "download_video" and state_update.get("video_path"):
+                logger.info(f"    → Video saved to: {state_update['video_path']}")
+
+            if node_name == "extract_frames" and state_update.get("frames"):
+                logger.info(f"    → Extracted {len(state_update['frames'])} frames")
+
+            if node_name == "analyze_video" and state_update.get("video_analysis"):
+                analysis = state_update["video_analysis"]
+                style = analysis.get("style", "unknown")
+                energy = analysis.get("energy", "unknown")
+                logger.info(f"    → Style: {style}, Energy: {energy}")
+
+            if node_name == "classify_ugc_intent" and state_update.get("ugc_intent"):
+                intent = state_update["ugc_intent"]
+                archetype = intent.get("archetype", "unknown")
+                logger.info(f"    → UGC Archetype: {archetype}")
+
+            if node_name == "generate_prompt" and state_update.get("video_prompt"):
+                prompt = state_update["video_prompt"]
+                logger.info(f"    → Prompt length: {len(prompt)} chars")
+                # Show first 100 chars of prompt
+                logger.info(f"    → Preview: {prompt[:100]}...")
+
+            if node_name == "generate_video" and state_update.get("generated_video_url"):
+                logger.info(f"    → Video URL: {state_update['generated_video_url']}")
 
             # Update job store with each state update
             job_store.update(job_id, state_update)
 
             # Check for errors
             if state_update.get("error"):
-                logger.error(
-                    f"Job {job_id} failed at {node_name}: {state_update.get('error')}"
-                )
+                logger.error(f"")
+                logger.error(f"{'='*60}")
+                logger.error(f"PIPELINE FAILED at {node_name}")
+                logger.error(f"Error: {state_update.get('error')}")
+                logger.error(f"{'='*60}")
                 job_store.update(job_id, {"status": "failed"})
                 return
+
+            # Log what's coming next
+            if step_count < total_steps:
+                next_steps = list(STEP_DESCRIPTIONS.keys())
+                if step_count < len(next_steps):
+                    next_step = next_steps[step_count]
+                    next_desc = STEP_DESCRIPTIONS.get(next_step, next_step)
+                    logger.info(f"")
+                    logger.info(f"[{step_count + 1}/{total_steps}] → {next_desc}")
 
         # Mark as completed
         job_store.update(
@@ -170,10 +244,18 @@ async def run_pipeline_async(job_id: str, initial_state: dict[str, Any]) -> None
                 "current_step": "done",
             },
         )
-        logger.info(f"Pipeline completed for job {job_id}")
+        logger.info(f"")
+        logger.info(f"{'='*60}")
+        logger.info(f"PIPELINE COMPLETED | Job: {job_id[:8]}...")
+        logger.info(f"{'='*60}")
 
     except Exception as e:
         logger.exception(f"Pipeline error for job {job_id}")
+        logger.error(f"")
+        logger.error(f"{'='*60}")
+        logger.error(f"PIPELINE CRASHED | Job: {job_id[:8]}...")
+        logger.error(f"Exception: {str(e)}")
+        logger.error(f"{'='*60}")
         job_store.update(
             job_id,
             {
@@ -216,11 +298,12 @@ async def start_pipeline(
             config = request.config.model_dump()
 
         # Create initial state
+        # If product info not provided, create_initial_state will auto-load default
         initial_state = create_initial_state(
             video_url=request.video_url,
             product_description=request.product_description,
             product_images=request.product_images,
-            product_category=request.product_category,
+            product_category=request.product_category,  # None triggers auto-load
             interaction_constraints=request.interaction_constraints,
             config=config,
             job_id=job_id,
@@ -275,6 +358,7 @@ async def get_job_status(job_id: str):
         selected_interactions=state.get("selected_interactions", []),
         video_prompt=state.get("video_prompt", ""),
         suggested_script=state.get("suggested_script", ""),
+        i2v_image_url=state.get("i2v_image_url", ""),
         generated_video_url=state.get("generated_video_url", ""),
         created_at=job.get("created_at", ""),
         updated_at=job.get("updated_at", ""),

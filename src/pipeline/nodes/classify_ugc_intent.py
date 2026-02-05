@@ -8,14 +8,21 @@ for more consistent prompt generation.
 
 import json
 import logging
-import os
 from typing import Any
 
 import anthropic
 
-from src.tracing import TracedAnthropicClient, is_tracing_enabled
+from src.pipeline.utils import (
+    get_anthropic_client,
+    handle_api_error,
+    handle_unexpected_error,
+    parse_json_response,
+)
 
 logger = logging.getLogger(__name__)
+
+# Default output fields for error handling
+_ERROR_DEFAULTS = {"ugc_intent": {}}
 
 # System prompt for classification (scoped to this node only)
 CLASSIFICATION_SYSTEM_PROMPT = """You are an expert at analyzing short-form UGC/TikTok selfie videos. Your task is NOT to rewrite or improve. Your task is to classify the example into a small set of semantic intent categories so it can be reliably recreated later. Do not invent facts. If unclear, pick the closest category. Respond ONLY with valid JSON using the specified schema."""
@@ -57,21 +64,13 @@ def classify_ugc_intent_node(state: dict[str, Any]) -> dict[str, Any]:
 
     logger.info("Classifying UGC intent from video analysis")
 
-    # Get API key
-    api_key = os.getenv("ANTHROPIC_API_KEY")
-    if not api_key:
+    # Get Anthropic client
+    client, model, error = get_anthropic_client(state, trace_name="classify_ugc_intent")
+    if error:
         return {
             "ugc_intent": {},
-            "error": "ANTHROPIC_API_KEY not set",
+            "error": error,
         }
-
-    # Initialize client (with tracing if enabled)
-    if is_tracing_enabled():
-        client = TracedAnthropicClient(api_key=api_key, trace_name="classify_ugc_intent")
-    else:
-        client = anthropic.Anthropic(api_key=api_key)
-
-    model = state.get("config", {}).get("claude_model", "claude-sonnet-4-20250514")
 
     try:
         # Build user message
@@ -88,7 +87,7 @@ def classify_ugc_intent_node(state: dict[str, Any]) -> dict[str, Any]:
 
         # Parse response
         response_text = response.content[0].text
-        ugc_intent = _parse_classification_response(response_text)
+        ugc_intent = parse_json_response(response_text, context="classification")
 
         if not ugc_intent:
             logger.warning("Could not parse classification response, using empty dict")
@@ -106,17 +105,9 @@ def classify_ugc_intent_node(state: dict[str, Any]) -> dict[str, Any]:
         }
 
     except anthropic.APIError as e:
-        logger.error(f"Claude API error during classification: {e}")
-        return {
-            "ugc_intent": {},
-            "error": f"Classification API error: {str(e)}",
-        }
+        return handle_api_error(e, _ERROR_DEFAULTS, context="UGC classification")
     except Exception as e:
-        logger.exception("Unexpected error during UGC classification")
-        return {
-            "ugc_intent": {},
-            "error": f"Classification failed: {str(e)}",
-        }
+        return handle_unexpected_error(e, _ERROR_DEFAULTS, context="UGC classification")
 
 
 def _build_classification_request(
@@ -151,38 +142,3 @@ def _build_classification_request(
 Respond with ONLY valid JSON matching the schema above. Use snake_case strings. Pick the closest category if unclear."""
 
     return request
-
-
-def _parse_classification_response(response_text: str) -> dict[str, Any] | None:
-    """
-    Parse the JSON response from Claude.
-
-    Args:
-        response_text: Raw response text
-
-    Returns:
-        Parsed dict or None if parsing fails
-    """
-    if not response_text:
-        return None
-
-    try:
-        # Try direct JSON parse first
-        return json.loads(response_text.strip())
-    except json.JSONDecodeError:
-        pass
-
-    # Fallback: find first JSON object in response
-    try:
-        json_start = response_text.find("{")
-        json_end = response_text.rfind("}") + 1
-
-        if json_start != -1 and json_end > json_start:
-            json_str = response_text[json_start:json_end]
-            return json.loads(json_str)
-
-        return None
-
-    except json.JSONDecodeError as e:
-        logger.warning(f"Failed to parse classification JSON: {e}")
-        return None

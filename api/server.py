@@ -11,6 +11,26 @@ from dotenv import load_dotenv
 
 load_dotenv()  # Load environment variables from .env
 
+import logging
+import sys
+
+# Configure logging to show INFO level with timestamps
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s | %(levelname)-8s | %(name)s | %(message)s",
+    datefmt="%H:%M:%S",
+    handlers=[logging.StreamHandler(sys.stdout)],
+    force=True,  # Override any existing config
+)
+
+# Set specific loggers to INFO level
+for logger_name in ["src.pipeline", "api", "uvicorn"]:
+    logging.getLogger(logger_name).setLevel(logging.INFO)
+
+# Suppress noisy httpx polling logs (Fal.ai queue status checks)
+logging.getLogger("httpx").setLevel(logging.WARNING)
+logging.getLogger("httpcore").setLevel(logging.WARNING)
+
 import uvicorn
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware

@@ -14,18 +14,27 @@ Core Concept - Mechanics Integrity:
 
 import json
 import logging
-import os
 from typing import Any
 
 import anthropic
 
+from src.pipeline.utils import (
+    get_anthropic_client,
+    get_product_description,
+    handle_api_error,
+    handle_unexpected_error,
+    parse_json_response,
+)
 from src.pipeline.utils.interaction_library import (
     INTERACTION_PRIMITIVES,
     validate_interaction_plan,
 )
-from src.tracing import TracedAnthropicClient, is_tracing_enabled
 
 logger = logging.getLogger(__name__)
+
+# Default output fields for error handling
+_ERROR_DEFAULTS = {"interaction_plan": {}}
+_ERROR_STEP = "interactions_planned"
 
 # System prompt for interaction planning
 PLANNING_SYSTEM_PROMPT = """You are a UGC director specializing in fidget products like mechanical keyboard keychains. Your task is to plan a short, mechanically plausible interaction sequence that showcases the product's tactile/auditory appeal.
@@ -85,28 +94,21 @@ def plan_interactions_node(state: dict[str, Any]) -> dict[str, Any]:
         State update with 'interaction_plan' dict
     """
     ugc_intent = state.get("ugc_intent", {})
-    product_description = state.get("product_description", "")
+    # Prefer enhanced description from Vision analysis, fall back to basic description
+    product_description = state.get("enhanced_product_description") or state.get("product_description", "")
     product_category = state.get("product_category", "mechanical_keyboard_keychain")
     interaction_constraints = state.get("interaction_constraints", {})
 
     logger.info("Planning interaction sequence")
 
-    # Get API key
-    api_key = os.getenv("ANTHROPIC_API_KEY")
-    if not api_key:
-        logger.warning("ANTHROPIC_API_KEY not set, returning empty plan")
+    # Get Anthropic client
+    client, model, error = get_anthropic_client(state, trace_name="plan_interactions")
+    if error:
+        logger.warning(f"{error}, returning empty plan")
         return {
             "interaction_plan": {},
             "current_step": "interactions_planned",
         }
-
-    # Initialize client (with tracing if enabled)
-    if is_tracing_enabled():
-        client = TracedAnthropicClient(api_key=api_key, trace_name="plan_interactions")
-    else:
-        client = anthropic.Anthropic(api_key=api_key)
-
-    model = state.get("config", {}).get("claude_model", "claude-sonnet-4-20250514")
 
     try:
         # Build user message
@@ -128,7 +130,7 @@ def plan_interactions_node(state: dict[str, Any]) -> dict[str, Any]:
 
         # Parse response
         response_text = response.content[0].text
-        interaction_plan = _parse_plan_response(response_text)
+        interaction_plan = parse_json_response(response_text, context="interaction plan")
 
         if not interaction_plan:
             logger.warning("Could not parse interaction plan, using empty dict")
@@ -154,17 +156,9 @@ def plan_interactions_node(state: dict[str, Any]) -> dict[str, Any]:
         }
 
     except anthropic.APIError as e:
-        logger.error(f"Claude API error during interaction planning: {e}")
-        return {
-            "interaction_plan": {},
-            "current_step": "interactions_planned",
-        }
+        return handle_api_error(e, _ERROR_DEFAULTS, _ERROR_STEP, context="interaction planning")
     except Exception as e:
-        logger.exception("Unexpected error during interaction planning")
-        return {
-            "interaction_plan": {},
-            "current_step": "interactions_planned",
-        }
+        return handle_unexpected_error(e, _ERROR_DEFAULTS, _ERROR_STEP, context="interaction planning")
 
 
 def _build_planning_request(
@@ -219,38 +213,3 @@ Plan a 1-3 beat sequence (total <=12s) that:
 Respond with ONLY valid JSON matching the schema above."""
 
     return request
-
-
-def _parse_plan_response(response_text: str) -> dict[str, Any] | None:
-    """
-    Parse the JSON response from Claude.
-
-    Args:
-        response_text: Raw response text
-
-    Returns:
-        Parsed dict or None if parsing fails
-    """
-    if not response_text:
-        return None
-
-    try:
-        # Try direct JSON parse first
-        return json.loads(response_text.strip())
-    except json.JSONDecodeError:
-        pass
-
-    # Fallback: find first JSON object in response
-    try:
-        json_start = response_text.find("{")
-        json_end = response_text.rfind("}") + 1
-
-        if json_start != -1 and json_end > json_start:
-            json_str = response_text[json_start:json_end]
-            return json.loads(json_str)
-
-        return None
-
-    except json.JSONDecodeError as e:
-        logger.warning(f"Failed to parse interaction plan JSON: {e}")
-        return None
