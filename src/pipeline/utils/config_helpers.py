@@ -130,9 +130,7 @@ def get_i2v_image_index(state: dict[str, Any]) -> int:
 
 def get_product_description(state: dict[str, Any]) -> str:
     """
-    Get the best available product description from state.
-
-    Prefers enhanced (Vision-generated) description over basic description.
+    Get the product description from state.
 
     Args:
         state: Pipeline state dictionary
@@ -140,10 +138,7 @@ def get_product_description(state: dict[str, Any]) -> str:
     Returns:
         Product description string
     """
-    return (
-        state.get("enhanced_product_description")
-        or state.get("product_description", "")
-    )
+    return state.get("product_description", "")
 
 
 def get_product_images(
@@ -162,37 +157,6 @@ def get_product_images(
     """
     images = state.get("product_images", [])
     return images[:max_images] if len(images) > max_images else images
-
-
-# =============================================================================
-# Interaction Constraint Helpers
-# =============================================================================
-
-
-def get_max_interaction_duration(state: dict[str, Any]) -> float:
-    """
-    Get the maximum total duration for interactions from constraints.
-
-    Args:
-        state: Pipeline state dictionary
-
-    Returns:
-        Maximum duration in seconds (default: 12.0)
-    """
-    return state.get("interaction_constraints", {}).get("max_duration_s", 12.0)
-
-
-def get_max_interaction_beats(state: dict[str, Any]) -> int:
-    """
-    Get the maximum number of interaction beats from constraints.
-
-    Args:
-        state: Pipeline state dictionary
-
-    Returns:
-        Maximum number of beats (default: 3)
-    """
-    return state.get("interaction_constraints", {}).get("max_beats", 3)
 
 
 # =============================================================================

@@ -1,8 +1,10 @@
 """
 Generate Prompt Node - Creates video generation prompts based on TikTok analysis.
 
-Takes the video analysis from Claude Vision and generates a prompt
-for video generation APIs (Sora, Kling, etc.) to recreate a similar style.
+Absorbs the reasoning of the former analyze_product, classify_ugc_intent,
+plan_interactions, and select_interactions nodes into a single LLM call.
+The model receives video analysis, product info, mechanics rules, and the
+full interaction library, then outputs a motion prompt and script.
 
 All LLM calls are traced via LangSmith for full observability.
 """
@@ -16,6 +18,7 @@ from src.pipeline.utils import (
     get_anthropic_client,
     handle_api_error,
     handle_unexpected_error,
+    load_interaction_library,
     parse_json_response,
     process_image,
 )
@@ -28,23 +31,22 @@ _ERROR_DEFAULTS = {"video_prompt": ""}
 
 def generate_prompt_node(state: dict[str, Any]) -> dict[str, Any]:
     """
-    Generate a video prompt based on TikTok analysis and product info.
+    Generate a video prompt based on TikTok analysis, product info, and mechanics.
 
-    Takes the video analysis and combines it with product information
-    to create a prompt for video generation.
+    Reads video analysis, product description, mechanics prose, and the
+    interaction library to produce a motion prompt and script in one shot.
 
     Args:
-        state: Pipeline state with 'video_analysis' and optionally 'product_description'
+        state: Pipeline state with 'video_analysis', 'product_description',
+               'product_mechanics', 'product_images'
 
     Returns:
-        State update with 'video_prompt' string
+        State update with 'video_prompt' and 'suggested_script'
     """
     video_analysis = state.get("video_analysis", {})
-    # Prefer enhanced description from Vision analysis, fall back to basic description
-    product_description = state.get("enhanced_product_description") or state.get("product_description", "")
+    product_description = state.get("product_description", "")
+    product_mechanics = state.get("product_mechanics", "")
     product_images = state.get("product_images", [])
-    interaction_plan = state.get("interaction_plan", {})
-    selected_interactions = state.get("selected_interactions", [])
 
     if not video_analysis:
         logger.warning("No video analysis provided")
@@ -55,7 +57,11 @@ def generate_prompt_node(state: dict[str, Any]) -> dict[str, Any]:
 
     logger.info("    ↳ Generating video prompt from analysis")
     logger.info(f"    ↳ Has product description: {bool(product_description)}")
-    logger.info(f"    ↳ Has interaction plan: {bool(interaction_plan)}")
+    logger.info(f"    ↳ Has mechanics rules: {bool(product_mechanics)}")
+
+    # Load interaction library
+    library = load_interaction_library()
+    logger.info(f"    ↳ Interaction library: {len(library.get('clips', []))} clips")
 
     # Get Anthropic client
     client, model, error = get_anthropic_client(state, trace_name="generate_prompt")
@@ -68,15 +74,15 @@ def generate_prompt_node(state: dict[str, Any]) -> dict[str, Any]:
     try:
         # Build the prompt generation request
         content = _build_prompt_request(
-            video_analysis, product_description, product_images,
-            interaction_plan, selected_interactions
+            video_analysis, product_description, product_mechanics,
+            product_images, library
         )
 
         # Call Claude
         logger.info(f"    ↳ Calling Claude ({model}) to generate prompt...")
         response = client.messages.create(
             model=model,
-            max_tokens=1500,
+            max_tokens=2000,
             messages=[{"role": "user", "content": content}],
         )
         logger.info("    ↳ Claude response received, parsing...")
@@ -113,22 +119,23 @@ def generate_prompt_node(state: dict[str, Any]) -> dict[str, Any]:
 def _build_prompt_request(
     video_analysis: dict[str, Any],
     product_description: str,
+    product_mechanics: str,
     product_images: list[str],
-    interaction_plan: dict[str, Any],
-    selected_interactions: list[dict[str, Any]],
+    library: dict[str, Any],
 ) -> list[dict[str, Any]]:
     """
     Build the content for prompt generation request.
 
-    For I2V pipeline: The video model starts with the product image as the first frame,
-    so prompts should focus on MOTION and ACTION, not product appearance.
+    Provides the model with video analysis prose, product info, mechanics
+    constraints, and the full interaction library inventory so it can pick
+    clips, plan beats, and write a motion prompt in one pass.
 
     Args:
         video_analysis: Analysis from analyze_video node
         product_description: User's product description
+        product_mechanics: Prose describing physical interaction rules
         product_images: List of product image URLs or base64
-        interaction_plan: Planned interaction sequence
-        selected_interactions: Selected clips from library
+        library: Loaded interaction library dict
 
     Returns:
         Content array for Claude API
@@ -138,24 +145,40 @@ def _build_prompt_request(
     # Format the video analysis
     analysis_text = _format_analysis(video_analysis)
 
-    # Format interaction plan if available
-    interaction_text = _format_interaction_plan(interaction_plan, selected_interactions)
+    # Format interaction library inventory
+    library_text = _format_library(library)
 
-    # Build the main prompt - I2V: focus on MOTION since the image is already provided
+    # Build the main prompt
     prompt = f"""You are an expert at creating MOTION prompts for AI image-to-video models.
 
 IMPORTANT: The video model will start with the actual product image as the first frame.
 Your prompt should describe HOW THINGS MOVE, not what the product looks like.
 
-I analyzed a TikTok video for its STYLE. Here's the style to replicate:
+## TIKTOK STYLE ANALYSIS
+I analyzed a TikTok video. Replicate this style:
 
 {analysis_text}
 
-## PRODUCT INFO (for context only - the model already sees the image)
+## PRODUCT INFO
 **Product**: {product_description if product_description else "A product shown in the starting image."}
-{interaction_text}
 
-Your task: Create a MOTION PROMPT that describes how the scene animates from the starting image.
+## MECHANICS RULES
+{product_mechanics if product_mechanics else "No specific mechanics rules provided."}
+
+These rules describe the physical reality of the product — how it's held, what moves,
+what stays still, how big it is relative to hands. Your motion prompt MUST obey these
+rules. If the rules say "only one finger presses at a time", do not show two fingers
+pressing simultaneously. If the rules say "4 keys in a row", do not show 6 keys.
+
+{library_text}
+
+## YOUR TASK
+Using the TikTok style, mechanics rules, and interaction library above:
+
+1. **Pick 1-3 clips** from the library that fit the TikTok's energy and style
+2. **Plan the beats** — a short choreographed sequence (total ≤ 12 seconds)
+3. **Write a motion prompt** describing how the scene animates from the product image
+4. **Write a casual script** (1-3 sentences) adapted for this product
 
 KEEP from TikTok:
 - Person appearance/vibe (age, clothing, energy)
@@ -173,21 +196,22 @@ FOCUS ON MOTION (the product image is already visible):
 - DO NOT describe the product's appearance (colors, materials, shape)
 
 CRITICAL REQUIREMENTS:
-1. Starting frame shows the product - describe how it MOVES from there
-2. Follow the INTERACTION SEQUENCE exactly (beat by beat)
-3. Focus on hand movements, camera motion, energy
-4. The product is already visible - don't describe its appearance
-5. Motion verbs: pull, click, flip, rotate, press, slide, reveal
-6. iPhone front-facing camera look, NOT cinematic
-7. Real skin with texture, natural imperfections - NOT airbrushed
-8. Slight handheld shake, natural micro-movements - NOT robotic
-9. Natural indoor lighting - NOT studio lighting
-10. Looking at phone screen (like filming themselves)
+1. Starting frame shows the product — describe how it MOVES from there
+2. Follow the MECHANICS RULES exactly — do not invent impossible movements
+3. Reference specific clip IDs you chose from the library
+4. Focus on hand movements, camera motion, energy
+5. The product is already visible — don't describe its appearance
+6. Motion verbs: pull, click, flip, rotate, press, slide, reveal
+7. iPhone front-facing camera look, NOT cinematic
+8. Real skin with texture, natural imperfections — NOT airbrushed
+9. Slight handheld shake, natural micro-movements — NOT robotic
+10. Natural indoor lighting — NOT studio lighting
+11. Looking at phone screen (like filming themselves)
 
 Respond in JSON format:
 {{
-    "video_prompt": "A motion-focused prompt. Start with the scene setup (person, setting, lighting from TikTok style), then describe the MOVEMENT and ACTION beat by beat. Do not describe the product's appearance - it's already in the starting frame.",
-    "script": "A short casual script (1-3 sentences) adapted for the new product - written how a real person talks on TikTok"
+    "video_prompt": "A motion-focused prompt. Start with the scene setup (person, setting, lighting from TikTok style), then describe the MOVEMENT and ACTION beat by beat. Reference the clip IDs you chose. Do not describe the product's appearance.",
+    "script": "A short casual script (1-3 sentences) adapted for the new product — written how a real person talks on TikTok"
 }}
 
 Return ONLY valid JSON."""
@@ -195,7 +219,6 @@ Return ONLY valid JSON."""
     content.append({"type": "text", "text": prompt})
 
     # Send product image so Claude can see what it's writing motion prompts for
-    # This helps Claude understand the physical form factor, clickable parts, etc.
     if product_images:
         image_data, media_type = process_image(product_images[0], auto_resize=True)
         if image_data:
@@ -215,75 +238,11 @@ Return ONLY valid JSON."""
     return content
 
 
-def _format_interaction_plan(
-    interaction_plan: dict[str, Any],
-    selected_interactions: list[dict[str, Any]],
-) -> str:
-    """
-    Format the interaction plan into prompt text.
-
-    For I2V: Emphasizes MOTION verbs, timing, and camera movement.
-    The product appearance is already visible in the starting frame.
-
-    Args:
-        interaction_plan: Planned interaction sequence
-        selected_interactions: Selected clips from library
-
-    Returns:
-        Formatted string for prompt
-    """
-    if not interaction_plan or not interaction_plan.get("sequence"):
-        return ""
-
-    parts = [
-        "",
-        "## MOTION SEQUENCE (starting from product image)",
-        "**Describe HOW these movements happen, not what the product looks like**",
-        "",
-    ]
-
-    # Add mechanics notes prominently at the top
-    if interaction_plan.get("key_mechanics_notes"):
-        parts.append(f"Key motion: {interaction_plan['key_mechanics_notes']}")
-        parts.append("")
-
-    for i, beat in enumerate(interaction_plan.get("sequence", [])):
-        primitive = beat.get("primitive", "unknown")
-        duration = beat.get("duration_s", 0)
-        framing = beat.get("framing", "close")
-        notes = beat.get("notes", "")
-        audio_emphasis = beat.get("audio_emphasis", False)
-
-        # Use motion-focused language
-        motion_name = primitive.replace("_", " ").title()
-        parts.append(f"Beat {i+1} ({duration}s): {motion_name}")
-        parts.append(f"  Camera: {framing} shot")
-        if audio_emphasis:
-            parts.append("  Rhythm: Emphasize the motion (satisfying click/snap)")
-        if notes:
-            parts.append(f"  Motion direction: {notes}")
-
-        # Add clip reference if available
-        if selected_interactions and i < len(selected_interactions):
-            selection = selected_interactions[i]
-            if selection.get("match_status") == "matched" and selection.get("clip"):
-                clip = selection["clip"]
-                parts.append(f"  Reference motion: {clip.get('id')}")
-
-        parts.append("")
-
-    parts.append(f"Total duration: {interaction_plan.get('total_duration_s', 0)}s")
-
-    return "\n".join(parts)
-
-
 def _format_analysis(analysis: dict[str, Any]) -> str:
     """
     Format the video analysis into a readable string.
 
-    Extracts STYLE elements only (person, setting, lighting, energy, camera).
-    Excludes product-specific elements (actions, what_makes_it_work) since
-    those will be replaced by the interaction plan.
+    Extracts style elements (person, setting, lighting, energy, camera).
 
     Args:
         analysis: Video analysis dict
@@ -293,7 +252,6 @@ def _format_analysis(analysis: dict[str, Any]) -> str:
     """
     parts = []
 
-    # KEEP: Style/vibe elements
     if analysis.get("setting"):
         parts.append(f"Setting: {analysis['setting']}")
 
@@ -316,9 +274,6 @@ def _format_analysis(analysis: dict[str, Any]) -> str:
             person_desc = f"Person: {person}"
         parts.append(person_desc)
 
-    # SKIP: actions - replaced by interaction plan
-    # SKIP: what_makes_it_work - product-specific
-
     if analysis.get("style"):
         parts.append(f"Style: {analysis['style']}")
 
@@ -329,3 +284,42 @@ def _format_analysis(analysis: dict[str, Any]) -> str:
         parts.append(f"Mood: {analysis['mood']}")
 
     return "\n".join(parts) if parts else "No specific style analysis available."
+
+
+def _format_library(library: dict[str, Any]) -> str:
+    """
+    Format the interaction library inventory for the prompt.
+
+    Args:
+        library: Loaded interaction library dict
+
+    Returns:
+        Formatted string listing all clips with their metadata
+    """
+    clips = library.get("clips", [])
+    if not clips:
+        return ""
+
+    parts = [
+        "## INTERACTION LIBRARY",
+        "Available reference clips (pick 1-3 that match the TikTok's energy):",
+        "",
+    ]
+
+    for clip in clips:
+        clip_id = clip.get("id", "unknown")
+        primitive = clip.get("primitive", "unknown")
+        framing = clip.get("framing", "unknown")
+        duration = clip.get("duration_s", 0)
+        description = clip.get("description", "")
+        tags = clip.get("tags", [])
+
+        line = f"- **{clip_id}**: {primitive} | {framing} | {duration}s"
+        if description:
+            line += f" | {description}"
+        if tags:
+            line += f" | tags: {', '.join(tags)}"
+        parts.append(line)
+
+    parts.append("")
+    return "\n".join(parts)

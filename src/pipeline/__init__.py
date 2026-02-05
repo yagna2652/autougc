@@ -41,15 +41,8 @@ from src.pipeline.state import (
 )
 from src.pipeline.types import (
     CameraInfo,
-    InteractionBeat,
-    InteractionClip,
-    InteractionConstraints,
-    InteractionPlanData,
     PersonInfo,
     PipelineConfig,
-    ProductVisualFeatures,
-    SelectedInteraction,
-    UGCIntentData,
     VideoAnalysisData,
 )
 
@@ -62,14 +55,7 @@ __all__ = [
     "VideoAnalysisData",
     "CameraInfo",
     "PersonInfo",
-    "UGCIntentData",
-    "InteractionPlanData",
-    "InteractionBeat",
-    "InteractionClip",
-    "SelectedInteraction",
-    "ProductVisualFeatures",
     "PipelineConfig",
-    "InteractionConstraints",
     # Product loader
     "load_product",
     "load_default_product",

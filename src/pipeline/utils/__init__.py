@@ -14,8 +14,6 @@ from src.pipeline.utils.config_helpers import (
     get_aspect_ratio,
     get_claude_model,
     get_i2v_image_index,
-    get_max_interaction_beats,
-    get_max_interaction_duration,
     get_num_frames,
     get_product_description,
     get_product_images,
@@ -38,10 +36,7 @@ from src.pipeline.utils.image_utils import (
     resize_image,
 )
 from src.pipeline.utils.interaction_library import (
-    INTERACTION_PRIMITIVES,
-    find_matching_clips,
     load_interaction_library,
-    validate_interaction_plan,
 )
 from src.pipeline.utils.json_utils import parse_json_response
 
@@ -58,8 +53,6 @@ __all__ = [
     "get_i2v_image_index",
     "get_product_description",
     "get_product_images",
-    "get_max_interaction_duration",
-    "get_max_interaction_beats",
     "validate_config",
     "DEFAULT_CLAUDE_MODEL",
     "DEFAULT_VIDEO_MODEL",
@@ -79,10 +72,7 @@ __all__ = [
     # JSON utilities
     "parse_json_response",
     # Interaction library
-    "INTERACTION_PRIMITIVES",
     "load_interaction_library",
-    "find_matching_clips",
-    "validate_interaction_plan",
     # FAL upload
     "upload_image_to_fal",
 ]

@@ -25,9 +25,6 @@ import type {
   PipelineResult,
   PipelineStatus,
   VideoAnalysisData,
-  UGCIntentData,
-  InteractionPlanData,
-  SelectedInteraction,
 } from "@/types/pipeline";
 
 export default function Home() {
@@ -49,12 +46,6 @@ export default function Home() {
   const [videoAnalysis, setVideoAnalysis] = useState<VideoAnalysisData | null>(
     null
   );
-  const [ugcIntent, setUgcIntent] = useState<UGCIntentData | null>(null);
-  const [interactionPlan, setInteractionPlan] =
-    useState<InteractionPlanData | null>(null);
-  const [selectedInteractions, setSelectedInteractions] = useState<
-    SelectedInteraction[]
-  >([]);
   const [videoPrompt, setVideoPrompt] = useState("");
   const [suggestedScript, setSuggestedScript] = useState("");
   const [generatedVideoUrl, setGeneratedVideoUrl] = useState("");
@@ -116,9 +107,6 @@ export default function Home() {
         if (data.status === "completed") {
           setStatus("completed");
           setVideoAnalysis(data.videoAnalysis);
-          setUgcIntent(data.ugcIntent || null);
-          setInteractionPlan(data.interactionPlan || null);
-          setSelectedInteractions(data.selectedInteractions || []);
           setVideoPrompt(data.videoPrompt);
           setSuggestedScript(data.suggestedScript);
           setGeneratedVideoUrl(data.generatedVideoUrl);
@@ -152,9 +140,6 @@ export default function Home() {
     setCurrentStep("Starting...");
     setError(null);
     setVideoAnalysis(null);
-    setUgcIntent(null);
-    setInteractionPlan(null);
-    setSelectedInteractions([]);
     setVideoPrompt("");
     setSuggestedScript("");
     setGeneratedVideoUrl("");
@@ -193,9 +178,6 @@ export default function Home() {
     setProductImages([]);
     setProductImagesBase64([]);
     setVideoAnalysis(null);
-    setUgcIntent(null);
-    setInteractionPlan(null);
-    setSelectedInteractions([]);
     setVideoPrompt("");
     setSuggestedScript("");
     setGeneratedVideoUrl("");
@@ -388,7 +370,7 @@ export default function Home() {
 
               {status === "completed" && (
                 <div className="text-green-600 dark:text-green-400">
-                  ✓ Pipeline completed successfully
+                  Pipeline completed successfully
                 </div>
               )}
             </CardContent>
@@ -415,62 +397,11 @@ export default function Home() {
               </Card>
             )}
 
-            {/* UGC Classification */}
-            {ugcIntent && Object.keys(ugcIntent).length > 0 && (
-              <Card className="mb-6">
-                <CardHeader>
-                  <CardTitle>4. UGC Classification</CardTitle>
-                  <CardDescription>
-                    Semantic intent classification for this video
-                  </CardDescription>
-                </CardHeader>
-                <CardContent>
-                  <pre className="bg-gray-100 dark:bg-gray-800 p-4 rounded-lg overflow-auto text-sm">
-                    {JSON.stringify(ugcIntent, null, 2)}
-                  </pre>
-                </CardContent>
-              </Card>
-            )}
-
-            {/* Interaction Plan */}
-            {interactionPlan && Object.keys(interactionPlan).length > 0 && (
-              <Card className="mb-6">
-                <CardHeader>
-                  <CardTitle>5. Interaction Plan</CardTitle>
-                  <CardDescription>
-                    Planned interaction sequence for the fidget product
-                  </CardDescription>
-                </CardHeader>
-                <CardContent>
-                  <pre className="bg-gray-100 dark:bg-gray-800 p-4 rounded-lg overflow-auto text-sm">
-                    {JSON.stringify(interactionPlan, null, 2)}
-                  </pre>
-                </CardContent>
-              </Card>
-            )}
-
-            {/* Selected Interactions */}
-            {selectedInteractions && selectedInteractions.length > 0 && (
-              <Card className="mb-6">
-                <CardHeader>
-                  <CardTitle>6. Selected Reference Clips</CardTitle>
-                  <CardDescription>
-                    Matched clips from the interaction library
-                  </CardDescription>
-                </CardHeader>
-                <CardContent>
-                  <pre className="bg-gray-100 dark:bg-gray-800 p-4 rounded-lg overflow-auto text-sm">
-                    {JSON.stringify(selectedInteractions, null, 2)}
-                  </pre>
-                </CardContent>
-              </Card>
-            )}
-
             {/* Generated Prompt */}
             {videoPrompt && (
               <Card className="mb-6">
                 <CardHeader>
-                  <CardTitle>7. Generated Video Prompt</CardTitle>
+                  <CardTitle>4. Generated Video Prompt</CardTitle>
                   <CardDescription>
                     The prompt used for video generation
                   </CardDescription>
@@ -495,7 +426,7 @@ export default function Home() {
             {generatedVideoUrl && (
               <Card className="mb-6">
                 <CardHeader>
-                  <CardTitle>8. Generated Video</CardTitle>
+                  <CardTitle>5. Generated Video</CardTitle>
                   <CardDescription>
                     Your UGC-style video is ready!
                   </CardDescription>

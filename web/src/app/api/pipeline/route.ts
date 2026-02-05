@@ -13,9 +13,6 @@ import type {
   PipelineRequest,
   PipelineResult,
   VideoAnalysisData,
-  UGCIntentData,
-  InteractionPlanData,
-  SelectedInteraction,
 } from "@/types/pipeline";
 
 const PYTHON_API_URL = process.env.PYTHON_API_URL || "http://localhost:8000";
@@ -107,11 +104,6 @@ async function handleStatus(
     currentStep: data.current_step || "",
     error: data.error || null,
     videoAnalysis: (data.video_analysis || null) as VideoAnalysisData | null,
-    ugcIntent: (data.ugc_intent || null) as UGCIntentData | null,
-    interactionPlan: (data.interaction_plan ||
-      null) as InteractionPlanData | null,
-    selectedInteractions: (data.selected_interactions ||
-      []) as SelectedInteraction[],
     videoPrompt: data.video_prompt || "",
     suggestedScript: data.suggested_script || "",
     generatedVideoUrl: data.generated_video_url || "",
