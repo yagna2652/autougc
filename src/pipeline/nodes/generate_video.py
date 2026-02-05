@@ -59,7 +59,7 @@ def generate_video_node(state: dict[str, Any]) -> dict[str, Any]:
             "current_step": "generation_failed",
         }
 
-    logger.info("Starting I2V video generation")
+    logger.info("    ↳ Starting Image-to-Video generation")
 
     # Check for FAL_KEY
     fal_key = os.getenv("FAL_KEY")
@@ -85,7 +85,7 @@ def generate_video_node(state: dict[str, Any]) -> dict[str, Any]:
 
     # Upload product image to Fal CDN
     selected_image = product_images[i2v_image_index]
-    logger.info(f"Uploading product image {i2v_image_index} to Fal CDN")
+    logger.info(f"    ↳ Uploading product image {i2v_image_index + 1} to Fal CDN...")
 
     i2v_image_url = upload_image_to_fal(selected_image, fal_key)
 
@@ -95,7 +95,7 @@ def generate_video_node(state: dict[str, Any]) -> dict[str, Any]:
             "current_step": "generation_failed",
         }
 
-    logger.info(f"Product image uploaded: {i2v_image_url}")
+    logger.info(f"    ↳ Image uploaded successfully: {i2v_image_url[:60]}...")
 
     # Sora 2 only supports 4, 8, or 12 second durations
     if "sora" in video_model:
@@ -112,13 +112,13 @@ def generate_video_node(state: dict[str, Any]) -> dict[str, Any]:
     # Get endpoint
     endpoint = MODEL_ENDPOINTS.get(video_model, MODEL_ENDPOINTS["sora"])
 
-    logger.info(f"Using model: {video_model} ({endpoint})")
-    logger.info(f"I2V image: {i2v_image_url}")
-    logger.info(f"Prompt: {video_prompt[:100]}...")
-
     # Calculate estimated cost
     price_per_second = MODEL_PRICING_PER_SECOND.get(video_model, 0.50)
     estimated_cost_usd = price_per_second * video_duration
+
+    logger.info(f"    ↳ Model: {video_model} ({endpoint})")
+    logger.info(f"    ↳ Duration: {video_duration}s, Aspect ratio: {aspect_ratio}")
+    logger.info(f"    ↳ Estimated cost: ${estimated_cost_usd:.2f}")
 
     # Trace the video generation
     with trace_span(
@@ -243,7 +243,8 @@ def _call_fal_api(
     # Set the API key in environment (fal_client reads from FAL_KEY)
     os.environ["FAL_KEY"] = fal_key
 
-    logger.info(f"Calling Fal.ai I2V: {endpoint}")
+    logger.info(f"    ↳ Calling Fal.ai I2V: {endpoint}")
+    logger.info(f"    ↳ This typically takes 2-5 minutes, please wait...")
 
     # Build API input based on model (both use image_url for I2V)
     if "kling" in endpoint:
@@ -262,13 +263,40 @@ def _call_fal_api(
             "aspect_ratio": aspect_ratio,
         }
 
-    logger.info(f"API input: {api_input}")
+    logger.info(f"    ↳ API input: duration={duration}s, aspect_ratio={aspect_ratio}")
+    logger.info(f"    ↳ Prompt preview: {prompt[:80]}...")
+
+    # Track status changes to avoid duplicate logs
+    last_status = [None]  # Use list to allow mutation in closure
+    start_time = time.time()
+
+    # Define a progress callback for fal_client
+    def on_queue_update(update):
+        elapsed = int(time.time() - start_time)
+
+        if hasattr(update, "status"):
+            status = update.status
+            # Only log if status changed
+            if status != last_status[0]:
+                last_status[0] = status
+                status_msg = {
+                    "IN_QUEUE": "Queued, waiting for GPU...",
+                    "IN_PROGRESS": "Generating video...",
+                    "COMPLETED": "Video generation complete!",
+                }.get(status, status)
+                logger.info(f"    ↳ [{elapsed}s] Fal.ai: {status_msg}")
+
+        if hasattr(update, "logs") and update.logs:
+            for log in update.logs:
+                if hasattr(log, "message"):
+                    logger.info(f"    ↳ [{elapsed}s] {log.message}")
 
     # Call API and wait for result
     result = fal_client.subscribe(
         endpoint,
         arguments=api_input,
         with_logs=True,
+        on_queue_update=on_queue_update,
     )
 
     if not result:

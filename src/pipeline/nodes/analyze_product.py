@@ -78,7 +78,7 @@ def analyze_product_node(state: dict[str, Any]) -> dict[str, Any]:
             "current_step": "product_analyzed",
         }
 
-    logger.info(f"Analyzing {len(product_images)} product images with Claude Vision")
+    logger.info(f"    ↳ Found {len(product_images)} product images to analyze")
 
     # Get Anthropic client
     client, model, error = get_anthropic_client(state, trace_name="analyze_product")
@@ -102,7 +102,7 @@ def analyze_product_node(state: dict[str, Any]) -> dict[str, Any]:
                 "current_step": "product_analyzed",
             }
 
-        logger.info(f"Content built with {len(content)} items, calling Claude Vision...")
+        logger.info(f"    ↳ Sending {len(content)} items to Claude Vision API...")
 
         # Call Claude Vision with timeout
         api_client = get_anthropic_client_with_timeout(

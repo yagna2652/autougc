@@ -17,6 +17,7 @@ from src.pipeline.utils import (
     handle_api_error,
     handle_unexpected_error,
     parse_json_response,
+    process_image,
 )
 
 logger = logging.getLogger(__name__)
@@ -52,7 +53,9 @@ def generate_prompt_node(state: dict[str, Any]) -> dict[str, Any]:
             "error": "No video analysis to base prompt on",
         }
 
-    logger.info("Generating video prompt from analysis")
+    logger.info("    ↳ Generating video prompt from analysis")
+    logger.info(f"    ↳ Has product description: {bool(product_description)}")
+    logger.info(f"    ↳ Has interaction plan: {bool(interaction_plan)}")
 
     # Get Anthropic client
     client, model, error = get_anthropic_client(state, trace_name="generate_prompt")
@@ -70,11 +73,13 @@ def generate_prompt_node(state: dict[str, Any]) -> dict[str, Any]:
         )
 
         # Call Claude
+        logger.info(f"    ↳ Calling Claude ({model}) to generate prompt...")
         response = client.messages.create(
             model=model,
             max_tokens=1500,
             messages=[{"role": "user", "content": content}],
         )
+        logger.info("    ↳ Claude response received, parsing...")
 
         # Parse response
         response_text = response.content[0].text
@@ -90,7 +95,8 @@ def generate_prompt_node(state: dict[str, Any]) -> dict[str, Any]:
         video_prompt = result.get("video_prompt", "")
         suggested_script = result.get("script", "")
 
-        logger.info(f"Generated video prompt: {len(video_prompt)} chars")
+        logger.info(f"    ↳ Generated video prompt: {len(video_prompt)} chars")
+        logger.info(f"    ↳ Prompt preview: {video_prompt[:100]}...")
 
         return {
             "video_prompt": video_prompt,
@@ -188,9 +194,23 @@ Return ONLY valid JSON."""
 
     content.append({"type": "text", "text": prompt})
 
-    # NOTE: Product images are NOT sent to Claude for prompt generation in I2V mode.
-    # The video model will see the actual product image as the starting frame.
-    # Claude only needs the product description for context.
+    # Send product image so Claude can see what it's writing motion prompts for
+    # This helps Claude understand the physical form factor, clickable parts, etc.
+    if product_images:
+        image_data, media_type = process_image(product_images[0], auto_resize=True)
+        if image_data:
+            content.append({"type": "text", "text": "\n## PRODUCT IMAGE (for reference)"})
+            content.append({
+                "type": "image",
+                "source": {
+                    "type": "base64",
+                    "media_type": media_type,
+                    "data": image_data,
+                },
+            })
+            logger.info("Added product image to prompt generation request")
+        else:
+            logger.warning("Failed to process product image for prompt generation")
 
     return content
 

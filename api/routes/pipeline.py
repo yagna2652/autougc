@@ -143,6 +143,20 @@ class JobStatusResponse(BaseModel):
 # =============================================================================
 
 
+# Human-readable descriptions for each pipeline step
+STEP_DESCRIPTIONS = {
+    "download_video": "Downloading TikTok video...",
+    "extract_frames": "Extracting key frames from video...",
+    "analyze_product": "Analyzing product images with Claude Vision...",
+    "analyze_video": "Analyzing video style with Claude Vision...",
+    "classify_ugc_intent": "Classifying UGC intent and archetype...",
+    "plan_interactions": "Planning product interactions for video...",
+    "select_interactions": "Selecting best interaction clips...",
+    "generate_prompt": "Generating video prompt with Claude...",
+    "generate_video": "Generating video with AI (this may take 2-5 minutes)...",
+}
+
+
 async def run_pipeline_async(job_id: str, initial_state: dict[str, Any]) -> None:
     """
     Run the pipeline in the background.
@@ -154,25 +168,73 @@ async def run_pipeline_async(job_id: str, initial_state: dict[str, Any]) -> None
     from src.pipeline import stream_pipeline
 
     try:
-        logger.info(f"Starting pipeline for job {job_id}")
+        logger.info(f"{'='*60}")
+        logger.info(f"PIPELINE STARTED | Job: {job_id[:8]}...")
+        logger.info(f"{'='*60}")
 
         # Update status to running
         job_store.update(job_id, {"status": "running"})
 
+        step_count = 0
+        total_steps = len(STEP_DESCRIPTIONS)
+
         # Stream through the pipeline
         for node_name, state_update in stream_pipeline(initial_state):
-            logger.info(f"Job {job_id}: {node_name} completed")
+            step_count += 1
+            step_desc = STEP_DESCRIPTIONS.get(node_name, node_name)
+
+            # Log completion with step number
+            logger.info(f"")
+            logger.info(f"[{step_count}/{total_steps}] ✓ {node_name} COMPLETED")
+
+            # Log any interesting details from the state update
+            if node_name == "download_video" and state_update.get("video_path"):
+                logger.info(f"    → Video saved to: {state_update['video_path']}")
+
+            if node_name == "extract_frames" and state_update.get("frames"):
+                logger.info(f"    → Extracted {len(state_update['frames'])} frames")
+
+            if node_name == "analyze_video" and state_update.get("video_analysis"):
+                analysis = state_update["video_analysis"]
+                style = analysis.get("style", "unknown")
+                energy = analysis.get("energy", "unknown")
+                logger.info(f"    → Style: {style}, Energy: {energy}")
+
+            if node_name == "classify_ugc_intent" and state_update.get("ugc_intent"):
+                intent = state_update["ugc_intent"]
+                archetype = intent.get("archetype", "unknown")
+                logger.info(f"    → UGC Archetype: {archetype}")
+
+            if node_name == "generate_prompt" and state_update.get("video_prompt"):
+                prompt = state_update["video_prompt"]
+                logger.info(f"    → Prompt length: {len(prompt)} chars")
+                # Show first 100 chars of prompt
+                logger.info(f"    → Preview: {prompt[:100]}...")
+
+            if node_name == "generate_video" and state_update.get("generated_video_url"):
+                logger.info(f"    → Video URL: {state_update['generated_video_url']}")
 
             # Update job store with each state update
             job_store.update(job_id, state_update)
 
             # Check for errors
             if state_update.get("error"):
-                logger.error(
-                    f"Job {job_id} failed at {node_name}: {state_update.get('error')}"
-                )
+                logger.error(f"")
+                logger.error(f"{'='*60}")
+                logger.error(f"PIPELINE FAILED at {node_name}")
+                logger.error(f"Error: {state_update.get('error')}")
+                logger.error(f"{'='*60}")
                 job_store.update(job_id, {"status": "failed"})
                 return
+
+            # Log what's coming next
+            if step_count < total_steps:
+                next_steps = list(STEP_DESCRIPTIONS.keys())
+                if step_count < len(next_steps):
+                    next_step = next_steps[step_count]
+                    next_desc = STEP_DESCRIPTIONS.get(next_step, next_step)
+                    logger.info(f"")
+                    logger.info(f"[{step_count + 1}/{total_steps}] → {next_desc}")
 
         # Mark as completed
         job_store.update(
@@ -182,10 +244,18 @@ async def run_pipeline_async(job_id: str, initial_state: dict[str, Any]) -> None
                 "current_step": "done",
             },
         )
-        logger.info(f"Pipeline completed for job {job_id}")
+        logger.info(f"")
+        logger.info(f"{'='*60}")
+        logger.info(f"PIPELINE COMPLETED | Job: {job_id[:8]}...")
+        logger.info(f"{'='*60}")
 
     except Exception as e:
         logger.exception(f"Pipeline error for job {job_id}")
+        logger.error(f"")
+        logger.error(f"{'='*60}")
+        logger.error(f"PIPELINE CRASHED | Job: {job_id[:8]}...")
+        logger.error(f"Exception: {str(e)}")
+        logger.error(f"{'='*60}")
         job_store.update(
             job_id,
             {

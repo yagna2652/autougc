@@ -49,7 +49,7 @@ def analyze_video_node(state: dict[str, Any]) -> dict[str, Any]:
             "error": "No frames to analyze",
         }
 
-    logger.info(f"Analyzing {len(frames)} frames with Claude Vision")
+    logger.info(f"    ↳ Analyzing {len(frames)} video frames with Claude Vision")
 
     # Get Anthropic client
     client, model, error = get_anthropic_client(state, trace_name="analyze_video")
@@ -61,20 +61,18 @@ def analyze_video_node(state: dict[str, Any]) -> dict[str, Any]:
 
     try:
         # Build the message content with frames
-        logger.info("Building analysis content from frames...")
+        logger.info("    ↳ Building analysis content from frames...")
         content = _build_analysis_content(frames)
 
         if not content:
-            logger.error("Failed to build content - no valid frames")
+            logger.error("    ↳ Failed to build content - no valid frames")
             return {
                 "video_analysis": {},
                 "error": "Failed to encode any frames for analysis",
                 "current_step": "analysis_failed",
             }
 
-        logger.info(
-            f"Content built with {len(content)} items, calling Claude Vision..."
-        )
+        logger.info(f"    ↳ Sending {len(content)} items to Claude Vision API...")
 
         # Call Claude Vision with timeout
         api_client = get_anthropic_client_with_timeout(

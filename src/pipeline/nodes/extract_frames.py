@@ -30,7 +30,7 @@ def extract_frames_node(state: dict[str, Any]) -> dict[str, Any]:
             "current_step": "extract_failed",
         }
 
-    logger.info(f"Extracting frames from: {video_path}")
+    logger.info(f"    ↳ Video path: {video_path}")
 
     try:
         from src.analyzer.frame_extractor import FrameExtractor
@@ -38,6 +38,8 @@ def extract_frames_node(state: dict[str, Any]) -> dict[str, Any]:
         # Get config
         config = state.get("config", {})
         num_frames = config.get("num_frames", 5)
+
+        logger.info(f"    ↳ Extracting {num_frames} frames using ffmpeg...")
 
         # Initialize extractor and extract frames
         extractor = FrameExtractor()
@@ -52,7 +54,9 @@ def extract_frames_node(state: dict[str, Any]) -> dict[str, Any]:
         # Convert to string paths
         frames = [str(p) for p in frame_paths]
 
-        logger.info(f"Extracted {len(frames)} frames")
+        logger.info(f"    ↳ Extracted {len(frames)} frames successfully")
+        for i, frame in enumerate(frames):
+            logger.info(f"      Frame {i+1}: {Path(frame).name}")
 
         return {
             "frames": frames,
