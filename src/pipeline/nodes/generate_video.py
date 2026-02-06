@@ -76,26 +76,37 @@ def generate_video_node(state: dict[str, Any]) -> dict[str, Any]:
     aspect_ratio = config.get("aspect_ratio", "9:16")
     i2v_image_index = config.get("i2v_image_index", 0)
 
-    # Validate image index
-    if i2v_image_index >= len(product_images):
-        logger.warning(
-            f"i2v_image_index {i2v_image_index} out of range, using index 0"
-        )
-        i2v_image_index = 0
+    # Use scene image (from Nano Banana Pro) if available, otherwise fall back to product image
+    scene_image_url = state.get("scene_image_url", "")
 
-    # Upload product image to Fal CDN
-    selected_image = product_images[i2v_image_index]
-    logger.info(f"    ↳ Uploading product image {i2v_image_index + 1} to Fal CDN...")
+    if scene_image_url:
+        # Scene image already on fal CDN — use it directly
+        i2v_image_url = scene_image_url
+        logger.info("    ↳ Using scene image as I2V starting frame (Nano Banana output)")
+        logger.info(f"    ↳ Scene image URL: {i2v_image_url[:60]}...")
+    else:
+        # Fallback: upload product image to Fal CDN
+        logger.info("    ↳ No scene image available, falling back to product image")
 
-    i2v_image_url = upload_image_to_fal(selected_image, fal_key)
+        # Validate image index
+        if i2v_image_index >= len(product_images):
+            logger.warning(
+                f"i2v_image_index {i2v_image_index} out of range, using index 0"
+            )
+            i2v_image_index = 0
 
-    if not i2v_image_url:
-        return {
-            "error": "Failed to upload product image to Fal CDN. Cannot proceed with I2V generation.",
-            "current_step": "generation_failed",
-        }
+        selected_image = product_images[i2v_image_index]
+        logger.info(f"    ↳ Uploading product image {i2v_image_index + 1} to Fal CDN...")
 
-    logger.info(f"    ↳ Image uploaded successfully: {i2v_image_url[:60]}...")
+        i2v_image_url = upload_image_to_fal(selected_image, fal_key)
+
+        if not i2v_image_url:
+            return {
+                "error": "Failed to upload product image to Fal CDN. Cannot proceed with I2V generation.",
+                "current_step": "generation_failed",
+            }
+
+        logger.info(f"    ↳ Image uploaded successfully: {i2v_image_url[:60]}...")
 
     # Sora 2 only supports 4, 8, or 12 second durations
     if "sora" in video_model:

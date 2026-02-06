@@ -42,6 +42,14 @@ export interface VideoAnalysisData {
 
 export type PipelineStatus = "idle" | "running" | "completed" | "failed";
 
+export type PipelineNodeId =
+  | "download_video"
+  | "extract_frames"
+  | "analyze_video"
+  | "generate_prompt"
+  | "generate_scene_image"
+  | "generate_video";
+
 export interface PipelineResult {
   jobId: string;
   status: PipelineStatus;
@@ -54,6 +62,7 @@ export interface PipelineResult {
   // Generated content
   videoPrompt: string;
   suggestedScript: string;
+  sceneImageUrl: string;
   generatedVideoUrl: string;
 }
 

@@ -100,13 +100,18 @@ def generate_prompt_node(state: dict[str, Any]) -> dict[str, Any]:
 
         video_prompt = result.get("video_prompt", "")
         suggested_script = result.get("script", "")
+        scene_description = result.get("scene_description", "")
 
         logger.info(f"    ↳ Generated video prompt: {len(video_prompt)} chars")
         logger.info(f"    ↳ Prompt preview: {video_prompt[:100]}...")
+        if scene_description:
+            logger.info(f"    ↳ Scene description: {len(scene_description)} chars")
+            logger.info(f"    ↳ Scene preview: {scene_description[:100]}...")
 
         return {
             "video_prompt": video_prompt,
             "suggested_script": suggested_script,
+            "scene_description": scene_description,
             "current_step": "prompt_generated",
         }
 
@@ -211,7 +216,8 @@ CRITICAL REQUIREMENTS:
 Respond in JSON format:
 {{
     "video_prompt": "A motion-focused prompt. Start with the scene setup (person, setting, lighting from TikTok style), then describe the MOVEMENT and ACTION beat by beat. Reference the clip IDs you chose. Do not describe the product's appearance.",
-    "script": "A short casual script (1-3 sentences) adapted for the new product — written how a real person talks on TikTok"
+    "script": "A short casual script (1-3 sentences) adapted for the new product — written how a real person talks on TikTok",
+    "scene_description": "A photorealistic image generation prompt for the FIRST FRAME of the video. Describe: the person (age, appearance, clothing from TikTok analysis), the setting/background, the lighting, the product being held or interacted with (name it explicitly), camera angle and framing, UGC/iPhone selfie aesthetic. This will be fed to an image generation model to create the starting frame, so be vivid and specific. Example: 'A young woman in her early 20s with long brown hair wearing a casual oversized hoodie, sitting at a desk in a cozy bedroom with warm natural window lighting, holding a small mechanical keyboard keychain in her right hand, close-up shot from slightly above, iPhone selfie camera style, authentic and unpolished feel'"
 }}
 
 Return ONLY valid JSON."""

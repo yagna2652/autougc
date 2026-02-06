@@ -126,6 +126,15 @@
   }
 }
 
+/* Pipeline node running glow animation */
+@keyframes pulse-glow {
+  0%, 100% { box-shadow: 0 0 4px 0 hsl(210 80% 60% / 0.3); }
+  50% { box-shadow: 0 0 12px 2px hsl(210 80% 60% / 0.5); }
+}
+.animate-pulse-glow {
+  animation: pulse-glow 2s ease-in-out infinite;
+}
+
 /* Fallback styles for when Tailwind classes don't apply */
 body {
   background-color: oklch(0.145 0 0);

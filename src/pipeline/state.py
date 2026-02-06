@@ -52,6 +52,10 @@ class PipelineState(TypedDict, total=False):
     video_analysis: VideoAnalysisData  # Claude Vision analysis
     video_prompt: str  # Generated prompt for video API
     suggested_script: str  # Suggested script/voiceover
+    scene_description: str  # Prompt for scene image generation (Nano Banana Pro)
+
+    # Scene image (composited first frame for I2V)
+    scene_image_url: str  # Fal CDN URL of generated scene image
 
     # I2V (Image-to-Video)
     i2v_image_url: str  # Fal CDN URL of uploaded product image
@@ -109,6 +113,8 @@ def create_initial_state(
         video_analysis={},
         video_prompt="",
         suggested_script="",
+        scene_description="",
+        scene_image_url="",
         i2v_image_url="",
         generated_video_url="",
     )

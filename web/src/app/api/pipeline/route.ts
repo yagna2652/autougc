@@ -53,8 +53,6 @@ async function handleStart(
     },
   };
 
-  console.log("Starting pipeline:", requestBody.video_url);
-
   const response = await fetch(`${PYTHON_API_URL}/api/v1/pipeline/start`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -106,6 +104,7 @@ async function handleStatus(
     videoAnalysis: (data.video_analysis || null) as VideoAnalysisData | null,
     videoPrompt: data.video_prompt || "",
     suggestedScript: data.suggested_script || "",
+    sceneImageUrl: data.scene_image_url || "",
     generatedVideoUrl: data.generated_video_url || "",
   };
 

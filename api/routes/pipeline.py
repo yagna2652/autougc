@@ -125,6 +125,7 @@ class JobStatusResponse(BaseModel):
     video_analysis: Optional[dict[str, Any]] = None
     video_prompt: str = ""
     suggested_script: str = ""
+    scene_image_url: str = ""  # Fal CDN URL of generated scene image
     i2v_image_url: str = ""  # Fal CDN URL used for I2V
     generated_video_url: str = ""
     created_at: str = ""
@@ -142,6 +143,7 @@ STEP_DESCRIPTIONS = {
     "extract_frames": "Extracting key frames from video...",
     "analyze_video": "Analyzing video style with Claude Vision...",
     "generate_prompt": "Generating video prompt with Claude...",
+    "generate_scene_image": "Generating scene image with Nano Banana Pro...",
     "generate_video": "Generating video with AI (this may take 2-5 minutes)...",
 }
 
@@ -194,6 +196,11 @@ async def run_pipeline_async(job_id: str, initial_state: dict[str, Any]) -> None
                 logger.info(f"    → Prompt length: {len(prompt)} chars")
                 # Show first 100 chars of prompt
                 logger.info(f"    → Preview: {prompt[:100]}...")
+                if state_update.get("scene_description"):
+                    logger.info(f"    → Scene description: {state_update['scene_description'][:100]}...")
+
+            if node_name == "generate_scene_image" and state_update.get("scene_image_url"):
+                logger.info(f"    → Scene image URL: {state_update['scene_image_url']}")
 
             if node_name == "generate_video" and state_update.get("generated_video_url"):
                 logger.info(f"    → Video URL: {state_update['generated_video_url']}")
@@ -338,6 +345,7 @@ async def get_job_status(job_id: str):
         video_analysis=state.get("video_analysis"),
         video_prompt=state.get("video_prompt", ""),
         suggested_script=state.get("suggested_script", ""),
+        scene_image_url=state.get("scene_image_url", ""),
         i2v_image_url=state.get("i2v_image_url", ""),
         generated_video_url=state.get("generated_video_url", ""),
         created_at=job.get("created_at", ""),
