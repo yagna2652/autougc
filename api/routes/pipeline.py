@@ -100,11 +100,7 @@ class StartPipelineRequest(BaseModel):
     )
     product_category: Optional[str] = Field(
         default=None,
-        description="Product category for interaction planning (auto-detected if not provided)",
-    )
-    interaction_constraints: dict[str, Any] = Field(
-        default_factory=dict,
-        description="Optional constraints for interaction planning (e.g., audio_emphasis)",
+        description="Product category (auto-detected if not provided)",
     )
     config: Optional[PipelineConfigModel] = Field(
         default=None, description="Pipeline configuration"
@@ -127,9 +123,6 @@ class JobStatusResponse(BaseModel):
     current_step: str = ""
     error: str = ""
     video_analysis: Optional[dict[str, Any]] = None
-    ugc_intent: dict[str, Any] = {}
-    interaction_plan: dict[str, Any] = {}
-    selected_interactions: list[dict[str, Any]] = []
     video_prompt: str = ""
     suggested_script: str = ""
     i2v_image_url: str = ""  # Fal CDN URL used for I2V
@@ -147,11 +140,7 @@ class JobStatusResponse(BaseModel):
 STEP_DESCRIPTIONS = {
     "download_video": "Downloading TikTok video...",
     "extract_frames": "Extracting key frames from video...",
-    "analyze_product": "Analyzing product images with Claude Vision...",
     "analyze_video": "Analyzing video style with Claude Vision...",
-    "classify_ugc_intent": "Classifying UGC intent and archetype...",
-    "plan_interactions": "Planning product interactions for video...",
-    "select_interactions": "Selecting best interaction clips...",
     "generate_prompt": "Generating video prompt with Claude...",
     "generate_video": "Generating video with AI (this may take 2-5 minutes)...",
 }
@@ -199,11 +188,6 @@ async def run_pipeline_async(job_id: str, initial_state: dict[str, Any]) -> None
                 style = analysis.get("style", "unknown")
                 energy = analysis.get("energy", "unknown")
                 logger.info(f"    → Style: {style}, Energy: {energy}")
-
-            if node_name == "classify_ugc_intent" and state_update.get("ugc_intent"):
-                intent = state_update["ugc_intent"]
-                archetype = intent.get("archetype", "unknown")
-                logger.info(f"    → UGC Archetype: {archetype}")
 
             if node_name == "generate_prompt" and state_update.get("video_prompt"):
                 prompt = state_update["video_prompt"]
@@ -304,7 +288,6 @@ async def start_pipeline(
             product_description=request.product_description,
             product_images=request.product_images,
             product_category=request.product_category,  # None triggers auto-load
-            interaction_constraints=request.interaction_constraints,
             config=config,
             job_id=job_id,
         )
@@ -353,9 +336,6 @@ async def get_job_status(job_id: str):
         current_step=state.get("current_step", ""),
         error=state.get("error", ""),
         video_analysis=state.get("video_analysis"),
-        ugc_intent=state.get("ugc_intent", {}),
-        interaction_plan=state.get("interaction_plan", {}),
-        selected_interactions=state.get("selected_interactions", []),
         video_prompt=state.get("video_prompt", ""),
         suggested_script=state.get("suggested_script", ""),
         i2v_image_url=state.get("i2v_image_url", ""),

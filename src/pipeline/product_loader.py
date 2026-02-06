@@ -153,6 +153,7 @@ def load_product(product_name: str = DEFAULT_PRODUCT) -> dict[str, Any]:
         "name": config.get("name", product_name),
         "description": config.get("description", ""),
         "category": config.get("category", ""),
+        "mechanics": config.get("mechanics", ""),
         "images": images,
     }
 

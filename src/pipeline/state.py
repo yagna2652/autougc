@@ -13,12 +13,7 @@ import logging
 from typing import Literal, TypedDict
 
 from src.pipeline.types import (
-    InteractionConstraints,
-    InteractionPlanData,
     PipelineConfig,
-    ProductVisualFeatures,
-    SelectedInteraction,
-    UGCIntentData,
     VideoAnalysisData,
 )
 
@@ -46,22 +41,15 @@ class PipelineState(TypedDict, total=False):
     product_description: str
     product_images: list[str]  # base64 or URLs
     product_category: str  # e.g., 'mechanical_keyboard_keychain'
-    interaction_constraints: InteractionConstraints
+    product_mechanics: str  # prose describing physical interaction rules
 
     # Config
     config: PipelineConfig
-
-    # Product analysis (from analyze_product node)
-    enhanced_product_description: str  # Vision-generated detailed description
-    product_visual_features: ProductVisualFeatures  # Structured visual analysis
 
     # Pipeline data (populated as we go)
     video_path: str  # Downloaded video file path
     frames: list[str]  # List of extracted frame paths
     video_analysis: VideoAnalysisData  # Claude Vision analysis
-    ugc_intent: UGCIntentData  # UGC classification results
-    interaction_plan: InteractionPlanData  # Planned interaction sequence
-    selected_interactions: list[SelectedInteraction]  # Selected clips for each beat
     video_prompt: str  # Generated prompt for video API
     suggested_script: str  # Suggested script/voiceover
 
@@ -77,7 +65,7 @@ def create_initial_state(
     product_description: str = "",
     product_images: list[str] | None = None,
     product_category: str | None = None,
-    interaction_constraints: InteractionConstraints | None = None,
+    product_mechanics: str = "",
     config: PipelineConfig | None = None,
     job_id: str | None = None,
 ) -> PipelineState:
@@ -89,7 +77,7 @@ def create_initial_state(
         product_description: Description of product to feature
         product_images: Product images (required) - base64 or URLs
         product_category: Product category for interaction planning
-        interaction_constraints: Optional constraints for interaction planning
+        product_mechanics: Prose describing physical interaction rules
         config: Optional configuration overrides
         job_id: Optional job ID (generated if not provided)
 
@@ -114,16 +102,11 @@ def create_initial_state(
         product_description=product_description,
         product_images=product_images,
         product_category=product_category or "mechanical_keyboard_keychain",
-        interaction_constraints=interaction_constraints or {},
+        product_mechanics=product_mechanics,
         config=config or {},
-        enhanced_product_description="",
-        product_visual_features={},
         video_path="",
         frames=[],
         video_analysis={},
-        ugc_intent={},
-        interaction_plan={},
-        selected_interactions=[],
         video_prompt="",
         suggested_script="",
         i2v_image_url="",

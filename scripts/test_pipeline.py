@@ -11,9 +11,6 @@ Usage:
 
     # Test with a real video URL (requires API keys)
     python scripts/test_pipeline.py --video-url "https://www.tiktok.com/..."
-
-    # Test just the prompt generation (with mock blueprint)
-    python scripts/test_pipeline.py --test-prompts
 """
 
 import argparse
@@ -50,28 +47,18 @@ def test_imports():
         print("✓ State module imported")
 
         from src.pipeline.nodes import (
-            analyze_product_node,
-            analyze_visuals_node,
+            analyze_video_node,
             download_video_node,
-            extract_audio_node,
             extract_frames_node,
-            finalize_prompt_node,
-            generate_base_prompt_node,
-            generate_blueprint_node,
-            generate_mechanics_node,
+            generate_prompt_node,
             generate_video_node,
-            transcribe_node,
         )
 
         print("✓ All nodes imported")
 
-        from src.pipeline.graphs import (
-            build_analysis_graph,
-            build_full_pipeline,
-            build_prompt_graph,
-        )
+        from src.pipeline.graphs.simple_pipeline import build_pipeline
 
-        print("✓ Graph builders imported")
+        print("✓ Graph builder imported")
 
         from langgraph.graph import END, START, StateGraph
 
@@ -91,11 +78,10 @@ def test_graph_building():
     print("=" * 60)
 
     try:
-        from src.pipeline.graphs.full_pipeline import build_full_pipeline
+        from src.pipeline.graphs.simple_pipeline import build_pipeline
 
-        # Build without checkpointer for testing
-        pipeline = build_full_pipeline(with_checkpointer=False)
-        print("✓ Full pipeline built")
+        pipeline = build_pipeline()
+        print("✓ Pipeline built")
 
         # Check nodes
         nodes = list(pipeline.nodes.keys())
@@ -121,134 +107,25 @@ def test_state_creation():
     print("=" * 60)
 
     try:
-        from src.pipeline.state import PipelineConfig, create_initial_state
+        from src.pipeline.state import create_initial_state
 
-        # Test with defaults
+        # Test with required product images
         state = create_initial_state(
             video_url="https://example.com/video.mp4",
             product_description="Test product",
+            product_images=["base64image1"],
+            product_mechanics="Test mechanics rules",
         )
         print("✓ Initial state created with defaults")
         print(f"  job_id: {state['job_id'][:8]}...")
         print(f"  status: {state['status']}")
         print(f"  current_step: {state['current_step']}")
-
-        # Test with custom config
-        config = PipelineConfig(
-            enable_mechanics=True,
-            product_category="tech",
-            target_duration=10.0,
-        )
-        state = create_initial_state(
-            video_url="https://example.com/video.mp4",
-            product_images=["base64image1", "base64image2"],
-            product_description="Cool gadget",
-            config=config,
-        )
-        print("✓ Initial state created with custom config")
-        print(f"  product_images: {len(state['product_images'])}")
-        print(f"  enable_mechanics: {state['config']['enable_mechanics']}")
+        print(f"  product_mechanics: {state['product_mechanics'][:40]}...")
 
         return True
 
     except Exception as e:
         print(f"✗ State creation failed: {e}")
-        import traceback
-
-        traceback.print_exc()
-        return False
-
-
-def test_prompt_generation_flow():
-    """Test the prompt generation flow with mock data."""
-    print("\n" + "=" * 60)
-    print("TEST: Prompt Generation Flow (Mock Data)")
-    print("=" * 60)
-
-    # Check for API key
-    if not os.getenv("ANTHROPIC_API_KEY"):
-        print("⚠ ANTHROPIC_API_KEY not set, skipping prompt generation test")
-        return True
-
-    try:
-        from src.pipeline.nodes import (
-            finalize_prompt_node,
-            generate_base_prompt_node,
-            generate_mechanics_node,
-        )
-        from src.pipeline.state import create_initial_state
-
-        # Create state with mock blueprint
-        state = create_initial_state(
-            video_url="",
-            product_description="Wireless earbuds with active noise cancellation",
-        )
-
-        # Add mock blueprint
-        state["blueprint"] = {
-            "source_video": "test.mp4",
-            "total_duration": 15.0,
-            "transcript": {"full_text": "These earbuds are amazing!"},
-            "structure": {
-                "hook": {"style": "casual_share", "text": "OMG you guys"},
-                "body": {"framework": "demonstration", "text": "Let me show you"},
-                "cta": {"urgency": "soft", "text": "Link in bio"},
-            },
-        }
-        state["blueprint_summary"] = {
-            "transcript": "These earbuds are amazing!",
-            "hook_style": "casual_share",
-            "body_framework": "demonstration",
-            "cta_urgency": "soft",
-            "setting": "bedroom",
-            "lighting": "natural",
-            "energy": "medium",
-            "duration": 15.0,
-        }
-
-        print("Testing base prompt generation...")
-        result = generate_base_prompt_node(state)
-        state.update(result)
-
-        if state.get("base_prompt"):
-            print(f"✓ Base prompt generated ({len(state['base_prompt'])} chars)")
-            print(f"  Preview: {state['base_prompt'][:100]}...")
-        else:
-            print("✗ No base prompt generated")
-            if state.get("error"):
-                print(f"  Error: {state['error']}")
-            return False
-
-        print("\nTesting mechanics generation...")
-        result = generate_mechanics_node(state)
-        state.update(result)
-
-        if state.get("mechanics_prompt"):
-            print(
-                f"✓ Mechanics prompt generated ({len(state['mechanics_prompt'])} chars)"
-            )
-        else:
-            print(
-                "⚠ No mechanics prompt (may be expected if blueprint validation fails)"
-            )
-
-        print("\nTesting prompt finalization...")
-        result = finalize_prompt_node(state)
-        state.update(result)
-
-        if state.get("final_prompt"):
-            print(f"✓ Final prompt selected ({len(state['final_prompt'])} chars)")
-            print(
-                f"  Source: {result.get('prompt_metadata', {}).get('source', 'unknown')}"
-            )
-        else:
-            print("✗ No final prompt")
-            return False
-
-        return True
-
-    except Exception as e:
-        print(f"✗ Prompt generation test failed: {e}")
         import traceback
 
         traceback.print_exc()
@@ -267,18 +144,15 @@ def test_full_pipeline_dry_run():
         create_initial_state(
             video_url="https://example.com/test.mp4",
             product_description="Test product",
+            product_images=["base64image1"],
         )
 
         print("Pipeline would execute these steps:")
         print("  1. download_video")
-        print("  2. extract_audio + extract_frames (parallel)")
-        print("  3. transcribe + analyze_visuals")
-        print("  4. generate_blueprint")
-        print("  5. analyze_product")
-        print("  6. generate_base_prompt")
-        print("  7. generate_mechanics")
-        print("  8. finalize_prompt")
-        print("  9. generate_video")
+        print("  2. extract_frames")
+        print("  3. analyze_video")
+        print("  4. generate_prompt")
+        print("  5. generate_video")
         print("")
         print("✓ Dry run complete (no actual execution)")
 
@@ -312,7 +186,8 @@ def run_full_pipeline(video_url: str):
 
         state = create_initial_state(
             video_url=video_url,
-            product_description="",  # Will be inferred from video
+            product_description="",  # Will use auto-loaded product
+            product_images=["placeholder"],  # Will be replaced by product loader
         )
 
         # Stream execution
@@ -334,8 +209,8 @@ def run_full_pipeline(video_url: str):
             print("✓ Pipeline completed successfully!")
             if state.get("generated_video_url"):
                 print(f"  Video URL: {state['generated_video_url']}")
-            if state.get("final_prompt"):
-                print(f"  Final prompt: {len(state['final_prompt'])} chars")
+            if state.get("video_prompt"):
+                print(f"  Video prompt: {len(state['video_prompt'])} chars")
             return True
         else:
             print(f"✗ Pipeline failed: {state.get('error', 'Unknown error')}")
@@ -354,11 +229,6 @@ def main():
     parser.add_argument(
         "--video-url",
         help="TikTok/Reel URL to test with (requires API keys)",
-    )
-    parser.add_argument(
-        "--test-prompts",
-        action="store_true",
-        help="Test prompt generation with mock data",
     )
     parser.add_argument(
         "--verbose",
@@ -381,11 +251,6 @@ def main():
     results["imports"] = test_imports()
     results["graph_building"] = test_graph_building()
     results["state_creation"] = test_state_creation()
-
-    # Optional tests
-    if args.test_prompts:
-        results["prompt_generation"] = test_prompt_generation_flow()
-
     results["dry_run"] = test_full_pipeline_dry_run()
 
     # Full pipeline test if URL provided
