@@ -106,6 +106,7 @@ async function handleStatus(
     videoAnalysis: (data.video_analysis || null) as VideoAnalysisData | null,
     videoPrompt: data.video_prompt || "",
     suggestedScript: data.suggested_script || "",
+    sceneImageUrl: data.scene_image_url || "",
     generatedVideoUrl: data.generated_video_url || "",
   };
 

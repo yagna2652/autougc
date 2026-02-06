@@ -48,6 +48,7 @@ export default function Home() {
   );
   const [videoPrompt, setVideoPrompt] = useState("");
   const [suggestedScript, setSuggestedScript] = useState("");
+  const [sceneImageUrl, setSceneImageUrl] = useState("");
   const [generatedVideoUrl, setGeneratedVideoUrl] = useState("");
 
   // Convert file to base64
@@ -109,6 +110,7 @@ export default function Home() {
           setVideoAnalysis(data.videoAnalysis);
           setVideoPrompt(data.videoPrompt);
           setSuggestedScript(data.suggestedScript);
+          setSceneImageUrl(data.sceneImageUrl);
           setGeneratedVideoUrl(data.generatedVideoUrl);
           clearInterval(interval);
         } else if (data.status === "failed") {
@@ -142,6 +144,7 @@ export default function Home() {
     setVideoAnalysis(null);
     setVideoPrompt("");
     setSuggestedScript("");
+    setSceneImageUrl("");
     setGeneratedVideoUrl("");
 
     try {
@@ -180,6 +183,7 @@ export default function Home() {
     setVideoAnalysis(null);
     setVideoPrompt("");
     setSuggestedScript("");
+    setSceneImageUrl("");
     setGeneratedVideoUrl("");
   };
 
@@ -422,11 +426,33 @@ export default function Home() {
               </Card>
             )}
 
+            {/* Scene Image (Nano Banana Pro) */}
+            {sceneImageUrl && (
+              <Card className="mb-6">
+                <CardHeader>
+                  <CardTitle>5. Scene Image</CardTitle>
+                  <CardDescription>
+                    Product composited into a TikTok-style scene (used as I2V
+                    starting frame)
+                  </CardDescription>
+                </CardHeader>
+                <CardContent>
+                  <div className="max-w-sm mx-auto">
+                    <img
+                      src={sceneImageUrl}
+                      alt="Generated scene"
+                      className="w-full rounded-lg"
+                    />
+                  </div>
+                </CardContent>
+              </Card>
+            )}
+
             {/* Generated Video */}
             {generatedVideoUrl && (
               <Card className="mb-6">
                 <CardHeader>
-                  <CardTitle>5. Generated Video</CardTitle>
+                  <CardTitle>6. Generated Video</CardTitle>
                   <CardDescription>
                     Your UGC-style video is ready!
                   </CardDescription>

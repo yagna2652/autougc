@@ -54,6 +54,7 @@ export interface PipelineResult {
   // Generated content
   videoPrompt: string;
   suggestedScript: string;
+  sceneImageUrl: string;
   generatedVideoUrl: string;
 }
 
