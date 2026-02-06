@@ -167,7 +167,7 @@ def _call_nano_banana(
     result = fal_client.subscribe(
         NANO_BANANA_ENDPOINT,
         arguments={
-            "image_url": product_image_url,
+            "image_urls": [product_image_url],
             "prompt": prompt,
             "aspect_ratio": "9:16",
             "output_format": "png",

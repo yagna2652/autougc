@@ -53,8 +53,6 @@ async function handleStart(
     },
   };
 
-  console.log("Starting pipeline:", requestBody.video_url);
-
   const response = await fetch(`${PYTHON_API_URL}/api/v1/pipeline/start`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
