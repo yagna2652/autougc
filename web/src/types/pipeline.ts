@@ -74,8 +74,21 @@ export interface StartPipelineRequest {
   action: "start";
   videoUrl: string;
   productDescription?: string;
+  productMechanics?: string;
   productImages: string[];
-  videoModel?: "sora" | "kling";
+  videoModel?: "sora" | "kling" | "kling-v3";
+  productIdentityPack?: {
+    front?: string;
+    side_45?: string;
+    back?: string;
+    top?: string;
+    close_up_logo?: string;
+    close_up_material?: string;
+  };
+  useIdentityPack?: boolean;
+  useTailImage?: boolean;
+  useAnchorFrames?: boolean;
+  segmentDuration?: number;
 }
 
 export interface StatusPipelineRequest {

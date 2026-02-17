@@ -4,7 +4,7 @@ Pipeline Nodes - Processing steps for the UGC generation pipeline.
 6-step pipeline:
 1. download_video - Download TikTok video from URL
 2. extract_frames - Extract key frames for analysis
-3. analyze_video - Analyze frames with Claude Vision
+3. analyze_video - Analyze frames with vision model (OpenRouter)
 4. generate_prompt - Generate video prompt from analysis + mechanics + library
 5. generate_scene_image - Composite product into TikTok-style scene (Nano Banana Pro)
 6. generate_video - Call video generation API

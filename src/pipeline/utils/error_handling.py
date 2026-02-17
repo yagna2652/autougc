@@ -10,8 +10,6 @@ from contextlib import contextmanager
 from functools import wraps
 from typing import Any, Callable, TypeVar
 
-import anthropic
-
 logger = logging.getLogger(__name__)
 
 # Type variable for generic function signatures
@@ -52,16 +50,16 @@ def build_error_result(
 
 
 def handle_api_error(
-    error: anthropic.APIError,
+    error: Exception,
     output_fields: dict[str, Any],
     current_step: str | None = None,
     context: str = "API call",
 ) -> dict[str, Any]:
     """
-    Handle Anthropic API errors with consistent logging and return format.
+    Handle API errors with consistent logging and return format.
 
     Args:
-        error: The Anthropic API error
+        error: The API error
         output_fields: Default values for output fields
         current_step: Optional step name
         context: Description for logging
@@ -69,9 +67,9 @@ def handle_api_error(
     Returns:
         Error result dictionary
     """
-    logger.error(f"Claude API error during {context}: {error}")
+    logger.error(f"API error during {context}: {error}")
     return build_error_result(
-        error=f"Claude API error: {str(error)}",
+        error=f"API error: {str(error)}",
         output_fields=output_fields,
         current_step=current_step,
         context=context,
@@ -141,9 +139,6 @@ def node_error_handler(
 
     try:
         yield result
-    except anthropic.APIError as e:
-        result.value = handle_api_error(e, output_fields, current_step, context)
-        result.had_error = True
     except Exception as e:
         result.value = handle_unexpected_error(e, output_fields, current_step, context)
         result.had_error = True
@@ -186,8 +181,6 @@ def with_error_handling(
         def wrapper(*args, **kwargs) -> dict[str, Any]:
             try:
                 return func(*args, **kwargs)
-            except anthropic.APIError as e:
-                return handle_api_error(e, output_fields, current_step, context)
             except Exception as e:
                 return handle_unexpected_error(e, output_fields, current_step, context)
 

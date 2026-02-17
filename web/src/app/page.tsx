@@ -22,13 +22,35 @@ import type {
   VideoAnalysisData,
 } from "@/types/pipeline";
 
+type IdentityKey =
+  | "front"
+  | "side_45"
+  | "back"
+  | "close_up_logo"
+  | "close_up_material";
+
+const IDENTITY_SLOTS: { key: IdentityKey; label: string }[] = [
+  { key: "front", label: "Front" },
+  { key: "side_45", label: "Side 45" },
+  { key: "back", label: "Back" },
+  { key: "close_up_logo", label: "Close-up Logo" },
+  { key: "close_up_material", label: "Close-up Material" },
+];
+
 export default function Home() {
   // Input state
   const [tiktokUrl, setTiktokUrl] = useState("");
   const [productDescription, setProductDescription] = useState("");
   const [productImages, setProductImages] = useState<File[]>([]);
   const [productImagesBase64, setProductImagesBase64] = useState<string[]>([]);
-  const [videoModel, setVideoModel] = useState<"sora" | "kling">("sora");
+  const [videoModel, setVideoModel] = useState<"sora" | "kling" | "kling-v3">("sora");
+  const [useIdentityPack, setUseIdentityPack] = useState(false);
+  const [useTailImage, setUseTailImage] = useState(false);
+  const [useAnchorFrames, setUseAnchorFrames] = useState(false);
+  const [segmentDuration, setSegmentDuration] = useState(2);
+  const [identityPack, setIdentityPack] = useState<{
+    [K in IdentityKey]?: string;
+  }>({});
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Pipeline state
@@ -85,6 +107,15 @@ export default function Home() {
     const newBase64 = productImagesBase64.filter((_, i) => i !== index);
     setProductImages(newFiles);
     setProductImagesBase64(newBase64);
+  };
+
+  const handleIdentityFileSelect = async (
+    key: IdentityKey,
+    file: File | null
+  ): Promise<void> => {
+    if (!file) return;
+    const base64 = await fileToBase64(file);
+    setIdentityPack((prev) => ({ ...prev, [key]: base64 }));
   };
 
   // Poll for job status
@@ -149,14 +180,19 @@ export default function Home() {
       const response = await fetch("/api/pipeline", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          action: "start",
-          videoUrl: tiktokUrl,
-          productDescription,
-          productImages: productImagesBase64,
-          videoModel,
-        }),
-      });
+          body: JSON.stringify({
+            action: "start",
+            videoUrl: tiktokUrl,
+            productDescription,
+            productImages: productImagesBase64,
+            videoModel,
+            productIdentityPack: Object.keys(identityPack).length ? identityPack : undefined,
+            useIdentityPack,
+            useTailImage,
+            useAnchorFrames,
+            segmentDuration,
+          }),
+        });
 
       const data = await response.json();
 
@@ -178,6 +214,11 @@ export default function Home() {
     setJobId(null);
     setProductImages([]);
     setProductImagesBase64([]);
+    setUseIdentityPack(false);
+    setUseTailImage(false);
+    setUseAnchorFrames(false);
+    setSegmentDuration(2);
+    setIdentityPack({});
     setVideoAnalysis(null);
     setVideoPrompt("");
     setSuggestedScript("");
@@ -242,7 +283,7 @@ export default function Home() {
               </Label>
               <Select
                 value={videoModel}
-                onValueChange={(value: "sora" | "kling") => setVideoModel(value)}
+                onValueChange={(value: "sora" | "kling" | "kling-v3") => setVideoModel(value)}
                 disabled={status === "running"}
               >
                 <SelectTrigger id="video-model" className="mt-1.5 bg-[hsl(220,6%,13%)] border-[hsl(220,4%,18%)] text-[hsl(220,4%,88%)] font-mono text-sm">
@@ -251,6 +292,7 @@ export default function Home() {
                 <SelectContent className="bg-[hsl(220,6%,13%)] border-[hsl(220,4%,18%)]">
                   <SelectItem value="sora">Sora 2</SelectItem>
                   <SelectItem value="kling">Kling 2.5</SelectItem>
+                  <SelectItem value="kling-v3">Kling V3</SelectItem>
                 </SelectContent>
               </Select>
             </div>
@@ -325,6 +367,79 @@ export default function Home() {
                 </div>
               )}
             </div>
+          </div>
+
+          {/* Advanced fidelity controls */}
+          <div className="rounded-md border border-[hsl(220,4%,18%)] bg-[hsl(220,6%,11%)] p-4 space-y-4">
+            <div className="text-[hsl(220,4%,45%)] font-mono text-xs uppercase tracking-[0.05em]">
+              Advanced Fidelity
+            </div>
+
+            <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+              <label className="flex items-center gap-2 text-sm text-[hsl(220,4%,75%)]">
+                <input
+                  type="checkbox"
+                  checked={useIdentityPack}
+                  onChange={(e) => setUseIdentityPack(e.target.checked)}
+                  disabled={status === "running"}
+                />
+                Use Identity Pack
+              </label>
+              <label className="flex items-center gap-2 text-sm text-[hsl(220,4%,75%)]">
+                <input
+                  type="checkbox"
+                  checked={useTailImage}
+                  onChange={(e) => setUseTailImage(e.target.checked)}
+                  disabled={status === "running"}
+                />
+                Use Tail Image
+              </label>
+              <label className="flex items-center gap-2 text-sm text-[hsl(220,4%,75%)]">
+                <input
+                  type="checkbox"
+                  checked={useAnchorFrames}
+                  onChange={(e) => setUseAnchorFrames(e.target.checked)}
+                  disabled={status === "running"}
+                />
+                Use Anchor Frames
+              </label>
+              <div className="flex items-center gap-2 text-sm text-[hsl(220,4%,75%)]">
+                <span>Segment Seconds</span>
+                <Input
+                  type="number"
+                  min={1}
+                  max={5}
+                  value={segmentDuration}
+                  onChange={(e) => setSegmentDuration(Number(e.target.value || 2))}
+                  disabled={status === "running" || !useAnchorFrames}
+                  className="h-8 w-20 bg-[hsl(220,6%,13%)] border-[hsl(220,4%,18%)] text-[hsl(220,4%,88%)]"
+                />
+              </div>
+            </div>
+
+            {useIdentityPack && (
+              <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+                {IDENTITY_SLOTS.map((slot) => (
+                  <div key={slot.key}>
+                    <Label className="text-[hsl(220,4%,45%)] font-mono text-xs uppercase tracking-[0.05em]">
+                      {slot.label}
+                    </Label>
+                    <input
+                      type="file"
+                      accept="image/*"
+                      disabled={status === "running"}
+                      onChange={(e) =>
+                        handleIdentityFileSelect(slot.key, e.target.files?.[0] || null)
+                      }
+                      className="mt-1.5 block w-full text-xs text-[hsl(220,4%,70%)]"
+                    />
+                    <div className="mt-1 text-xs text-[hsl(220,4%,40%)]">
+                      {identityPack[slot.key] ? "Loaded" : "Not set"}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
 
           {/* Action row */}

@@ -123,10 +123,13 @@ def create_initial_state(
     """
     Create initial pipeline state.
 
+    If product fields are missing, this function attempts to auto-load the
+    default product from assets/products before validating required images.
+
     Args:
         video_url: TikTok URL to analyze
         product_description: Description of product to feature
-        product_images: Product images (required) - base64 or URLs
+        product_images: Product images (auto-loaded from default product if missing)
         product_category: Product category for interaction planning
         product_mechanics: Prose describing physical interaction rules
         config: Optional configuration overrides
@@ -136,13 +139,44 @@ def create_initial_state(
         Initial PipelineState
 
     Raises:
-        ValueError: If product_images is empty or not provided
+        ValueError: If product_images is empty and default product loading fails
     """
     import uuid
 
+    resolved_description = product_description
+    resolved_images = list(product_images or [])
+    resolved_category = product_category or ""
+    resolved_mechanics = product_mechanics
+
+    # Auto-load default product details when fields are missing.
+    if (
+        not resolved_images
+        or not resolved_description
+        or not resolved_category
+        or not resolved_mechanics
+    ):
+        try:
+            from src.pipeline.product_loader import load_product
+
+            default_product = load_product()
+            if not resolved_description:
+                resolved_description = default_product.get("description", "")
+            if not resolved_images:
+                resolved_images = default_product.get("images", [])
+            if not resolved_category:
+                resolved_category = default_product.get(
+                    "category", "mechanical_keyboard_keychain"
+                )
+            if not resolved_mechanics:
+                resolved_mechanics = default_product.get("mechanics", "")
+        except FileNotFoundError as e:
+            logger.warning(f"Default product load failed: {e}")
+
     # Validate required product images
-    if not product_images:
-        raise ValueError("Product images are required for video generation")
+    if not resolved_images:
+        raise ValueError(
+            "Product images are required for video generation (none provided and default product could not be loaded)"
+        )
 
     return PipelineState(
         job_id=job_id or str(uuid.uuid4()),
@@ -150,11 +184,11 @@ def create_initial_state(
         current_step="initializing",
         error="",
         video_url=video_url,
-        product_description=product_description,
-        product_images=product_images,
+        product_description=resolved_description,
+        product_images=resolved_images,
         product_identity_pack=product_identity_pack or {},
-        product_category=product_category or "mechanical_keyboard_keychain",
-        product_mechanics=product_mechanics,
+        product_category=resolved_category or "mechanical_keyboard_keychain",
+        product_mechanics=resolved_mechanics,
         config=config or {},
         video_path="",
         frames=[],

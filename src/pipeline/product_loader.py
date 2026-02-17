@@ -94,6 +94,36 @@ PRODUCTS_DIR = Path(__file__).parent.parent.parent / "assets" / "products"
 DEFAULT_PRODUCT = "keychain"
 
 
+def _build_mechanics_text(config: dict[str, Any]) -> str:
+    """
+    Build a richer mechanics string from config fields.
+
+    Keeps backward compatibility with existing prose-based mechanics while
+    allowing optional structured fields to tighten interaction constraints.
+    """
+    base_mechanics = str(config.get("mechanics", "") or "").strip()
+    grip = str(config.get("grip", "") or "").strip()
+    impossible = config.get("impossible_interactions", [])
+
+    sections: list[str] = []
+    if base_mechanics:
+        sections.append(base_mechanics)
+
+    if grip:
+        sections.append(f"Grip guidance:\n- {grip}")
+
+    if isinstance(impossible, list) and impossible:
+        impossible_lines = [
+            f"- {item.strip()}"
+            for item in impossible
+            if isinstance(item, str) and item.strip()
+        ]
+        if impossible_lines:
+            sections.append("Impossible interactions:\n" + "\n".join(impossible_lines))
+
+    return "\n\n".join(sections).strip()
+
+
 def load_product(product_name: str = DEFAULT_PRODUCT) -> dict[str, Any]:
     """
     Load a product configuration and images.
@@ -153,17 +183,17 @@ def load_product(product_name: str = DEFAULT_PRODUCT) -> dict[str, Any]:
         "name": config.get("name", product_name),
         "description": config.get("description", ""),
         "category": config.get("category", ""),
-        "mechanics": config.get("mechanics", ""),
+        "mechanics": _build_mechanics_text(config),
         "images": images,
     }
 
 
-def load_default_product() -> tuple[str, list[str], str]:
+def load_default_product() -> tuple[str, list[str], str, str]:
     """
     Load the default product (keychain).
 
     Returns:
-        Tuple of (description, images_base64, category)
+        Tuple of (description, images_base64, category, mechanics)
     """
     try:
         product = load_product(DEFAULT_PRODUCT)
@@ -171,10 +201,11 @@ def load_default_product() -> tuple[str, list[str], str]:
             product["description"],
             product["images"],
             product["category"],
+            product["mechanics"],
         )
     except FileNotFoundError as e:
         logger.warning(f"Default product not found: {e}")
-        return "", [], "mechanical_keyboard_keychain"
+        return "", [], "mechanical_keyboard_keychain", ""
 
 
 def get_available_products() -> list[str]:

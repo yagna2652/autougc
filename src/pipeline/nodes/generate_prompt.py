@@ -10,17 +10,18 @@ All LLM calls are traced via LangSmith for full observability.
 """
 
 import logging
+import re
 from typing import Any
 
-import anthropic
+from openai import OpenAI
 
 from src.pipeline.utils import (
-    get_anthropic_client,
-    handle_api_error,
+    get_openrouter_client,
     handle_unexpected_error,
     load_interaction_library,
     parse_json_response,
     process_image,
+    resolve_clip_ids_to_plain_language,
 )
 
 logger = logging.getLogger(__name__)
@@ -63,8 +64,10 @@ def generate_prompt_node(state: dict[str, Any]) -> dict[str, Any]:
     library = load_interaction_library()
     logger.info(f"    ↳ Interaction library: {len(library.get('clips', []))} clips")
 
-    # Get Anthropic client
-    client, model, error = get_anthropic_client(state, trace_name="generate_prompt")
+    # Get OpenRouter client for text model
+    client, model, error = get_openrouter_client(
+        state, trace_name="generate_prompt", model_type="text"
+    )
     if error:
         return {
             "video_prompt": "",
@@ -73,32 +76,66 @@ def generate_prompt_node(state: dict[str, Any]) -> dict[str, Any]:
 
     try:
         # Build the prompt generation request
-        content = _build_prompt_request(
+        content = _build_prompt_request_openrouter(
             video_analysis, product_description, product_mechanics,
             product_images, library
         )
 
-        # Call Claude
-        logger.info(f"    ↳ Calling Claude ({model}) to generate prompt...")
-        response = client.messages.create(
+        # Call OpenRouter
+        logger.info(f"    ↳ Calling OpenRouter ({model}) to generate prompt...")
+        response = client.chat.completions.create(
             model=model,
             max_tokens=2000,
             messages=[{"role": "user", "content": content}],
         )
-        logger.info("    ↳ Claude response received, parsing...")
+        logger.info("    ↳ OpenRouter response received, parsing...")
+
+        # Check for errors
+        if hasattr(response, 'error') and response.error:
+            error_msg = response.error.get('message', 'Unknown error')
+            logger.error(f"OpenRouter error: {error_msg}")
+            return {
+                "video_prompt": "",
+                "error": f"OpenRouter error: {error_msg}",
+            }
 
         # Parse response
-        response_text = response.content[0].text
+        if not response.choices or not response.choices[0].message:
+            logger.error("No response from OpenRouter")
+            return {
+                "video_prompt": "",
+                "error": "No response from OpenRouter",
+            }
+
+        response_text = response.choices[0].message.content
+        if not response_text:
+            logger.error("Empty response from OpenRouter")
+            return {
+                "video_prompt": "",
+                "error": "Empty response from OpenRouter",
+            }
+
         result = parse_json_response(response_text, context="prompt generation")
 
         if not result:
             logger.warning("Could not parse prompt response")
+            resolved_raw = resolve_clip_ids_to_plain_language(response_text, library)
             return {
-                "video_prompt": response_text,  # Use raw response as fallback
+                "video_prompt": resolved_raw,  # Use raw response as fallback
                 "current_step": "prompt_generated",
             }
 
-        video_prompt = result.get("video_prompt", "")
+        video_prompt = resolve_clip_ids_to_plain_language(
+            result.get("video_prompt", ""), library
+        )
+        negative_prompt = str(result.get("negative_prompt", "") or "").strip()
+        if not negative_prompt:
+            impossible = _extract_impossible_interactions(product_mechanics)
+            if impossible:
+                negative_prompt = "; ".join(
+                    f"Do NOT show {constraint}" for constraint in impossible
+                )
+        video_prompt = _append_negative_constraints(video_prompt, negative_prompt)
         suggested_script = result.get("script", "")
         scene_description = result.get("scene_description", "")
 
@@ -115,9 +152,8 @@ def generate_prompt_node(state: dict[str, Any]) -> dict[str, Any]:
             "current_step": "prompt_generated",
         }
 
-    except anthropic.APIError as e:
-        return handle_api_error(e, _ERROR_DEFAULTS, context="prompt generation")
     except Exception as e:
+        logger.error(f"Error during prompt generation: {str(e)}")
         return handle_unexpected_error(e, _ERROR_DEFAULTS, context="prompt generation")
 
 
@@ -175,6 +211,14 @@ what stays still, how big it is relative to hands. Your motion prompt MUST obey 
 rules. If the rules say "only one finger presses at a time", do not show two fingers
 pressing simultaneously. If the rules say "4 keys in a row", do not show 6 keys.
 
+## PHYSICS CONSTRAINTS (MANDATORY IN video_prompt)
+- State product scale relative to hand and stable grip.
+- Specify exactly which finger(s) move in each beat.
+- Specify what stays still: product body, grip hand, wrist, and palm.
+- Include explicit click/press count and rhythm per beat (e.g., 4 clicks, 0.3s cadence).
+- Use at least 3 explicit "DO NOT" constraints grounded in mechanics.
+- Never show physically impossible gestures listed in mechanics.
+
 {library_text}
 
 ## YOUR TASK
@@ -212,10 +256,14 @@ CRITICAL REQUIREMENTS:
 9. Slight handheld shake, natural micro-movements — NOT robotic
 10. Natural indoor lighting — NOT studio lighting
 11. Looking at phone screen (like filming themselves)
+12. For each beat, name the active finger(s) and which hand stabilizes the product
+13. Explicitly state what remains stationary in each beat
+14. Add a clear "DO NOT SHOW" section inside the video prompt
 
 Respond in JSON format:
 {{
-    "video_prompt": "A motion-focused prompt. Start with the scene setup (person, setting, lighting from TikTok style), then describe the MOVEMENT and ACTION beat by beat. Reference the clip IDs you chose. Do not describe the product's appearance.",
+    "video_prompt": "A motion-focused prompt. Start with scene setup, then beat-by-beat motion with exact finger choreography, click counts, cadence, what remains still, and a DO NOT SHOW section. Do not describe product appearance.",
+    "negative_prompt": "A semicolon-separated list of explicit forbidden motions from mechanics and physics constraints.",
     "script": "A short casual script (1-3 sentences) adapted for the new product — written how a real person talks on TikTok",
     "scene_description": "A photorealistic image generation prompt for the FIRST FRAME of the video. Describe: the person (age, appearance, clothing from TikTok analysis), the setting/background, the lighting, the product being held or interacted with (name it explicitly), camera angle and framing, UGC/iPhone selfie aesthetic. This will be fed to an image generation model to create the starting frame, so be vivid and specific. Example: 'A young woman in her early 20s with long brown hair wearing a casual oversized hoodie, sitting at a desk in a cozy bedroom with warm natural window lighting, holding a small mechanical keyboard keychain in her right hand, close-up shot from slightly above, iPhone selfie camera style, authentic and unpolished feel'"
 }}
@@ -235,6 +283,135 @@ Return ONLY valid JSON."""
                     "type": "base64",
                     "media_type": media_type,
                     "data": image_data,
+                },
+            })
+            logger.info("Added product image to prompt generation request")
+        else:
+            logger.warning("Failed to process product image for prompt generation")
+
+    return content
+
+
+def _build_prompt_request_openrouter(
+    video_analysis: dict[str, Any],
+    product_description: str,
+    product_mechanics: str,
+    product_images: list[str],
+    library: dict[str, Any],
+) -> list[dict[str, Any]]:
+    """
+    Build the content for prompt generation request (OpenRouter format).
+
+    Args:
+        video_analysis: Analysis from analyze_video node
+        product_description: User's product description
+        product_mechanics: Prose describing physical interaction rules
+        product_images: List of product image URLs or base64
+        library: Loaded interaction library dict
+
+    Returns:
+        Content array for OpenRouter API (OpenAI-compatible format)
+    """
+    content = []
+
+    # Format the video analysis
+    analysis_text = _format_analysis(video_analysis)
+
+    # Format interaction library inventory
+    library_text = _format_library(library)
+
+    # Build the main prompt
+    prompt = f"""You are an expert at creating MOTION prompts for AI image-to-video models.
+
+IMPORTANT: The video model will start with the actual product image as the first frame.
+Your prompt should describe HOW THINGS MOVE, not what the product looks like.
+
+## TIKTOK STYLE ANALYSIS
+I analyzed a TikTok video. Replicate this style:
+
+{analysis_text}
+
+## PRODUCT INFO
+**Product**: {product_description if product_description else "A product shown in the starting image."}
+
+## MECHANICS RULES
+{product_mechanics if product_mechanics else "No specific mechanics rules provided."}
+
+These rules describe the physical reality of the product — how it's held, what moves,
+what stays still, how big it is relative to hands. Your motion prompt MUST obey these
+rules. If the rules say "only one finger presses at a time", do not show two fingers
+pressing simultaneously. If the rules say "4 keys in a row", do not show 6 keys.
+
+## PHYSICS CONSTRAINTS (MANDATORY IN video_prompt)
+- State product scale relative to hand and stable grip.
+- Specify exactly which finger(s) move in each beat.
+- Specify what stays still: product body, grip hand, wrist, and palm.
+- Include explicit click/press count and rhythm per beat (e.g., 4 clicks, 0.3s cadence).
+- Use at least 3 explicit "DO NOT" constraints grounded in mechanics.
+- Never show physically impossible gestures listed in mechanics.
+
+{library_text}
+
+## YOUR TASK
+Using the TikTok style, mechanics rules, and interaction library above:
+
+1. **Pick 1-3 clips** from the library that fit the TikTok's energy and style
+2. **Plan the beats** — a short choreographed sequence (total ≤ 12 seconds)
+3. **Write a motion prompt** describing how the scene animates from the product image
+4. **Write a casual script** (1-3 sentences) adapted for this product
+
+KEEP from TikTok:
+- Person appearance/vibe (age, clothing, energy)
+- Setting/background
+- Lighting style
+- Camera movement (handheld, angle)
+- Pacing and energy level
+- Authenticity/UGC feel
+
+FOCUS ON MOTION (the product image is already visible):
+- Hand movements: pull, click, flip, rotate, squeeze, tap
+- Timing and rhythm of actions
+- Camera motion per beat (push in, pull back, slight pan)
+- Energy and dynamics (quick/snappy vs smooth/slow)
+- DO NOT describe the product's appearance (colors, materials, shape)
+
+CRITICAL REQUIREMENTS:
+1. Starting frame shows the product — describe how it MOVES from there
+2. Follow the MECHANICS RULES exactly — do not invent impossible movements
+3. Reference specific clip IDs you chose from the library
+4. Focus on hand movements, camera motion, energy
+5. The product is already visible — don't describe its appearance
+6. Motion verbs: pull, click, flip, rotate, press, slide, reveal
+7. iPhone front-facing camera look, NOT cinematic
+8. Real skin with texture, natural imperfections — NOT airbrushed
+9. Slight handheld shake, natural micro-movements — NOT robotic
+10. Natural indoor lighting — NOT studio lighting
+11. Looking at phone screen (like filming themselves)
+12. For each beat, name the active finger(s) and which hand stabilizes the product
+13. Explicitly state what remains stationary in each beat
+14. Add a clear "DO NOT SHOW" section inside the video prompt
+
+Respond in JSON format:
+{{
+    "video_prompt": "A motion-focused prompt. Start with scene setup, then beat-by-beat motion with exact finger choreography, click counts, cadence, what remains still, and a DO NOT SHOW section. Do not describe product appearance.",
+    "negative_prompt": "A semicolon-separated list of explicit forbidden motions from mechanics and physics constraints.",
+    "script": "A short casual script (1-3 sentences) adapted for the new product — written how a real person talks on TikTok",
+    "scene_description": "A photorealistic image generation prompt for the FIRST FRAME of the video. Describe: the person (age, appearance, clothing from TikTok analysis), the setting/background, the lighting, the product being held or interacted with (name it explicitly), camera angle and framing, UGC/iPhone selfie aesthetic. This will be fed to an image generation model to create the starting frame, so be vivid and specific. Example: 'A young woman in her early 20s with long brown hair wearing a casual oversized hoodie, sitting at a desk in a cozy bedroom with warm natural window lighting, holding a small mechanical keyboard keychain in her right hand, close-up shot from slightly above, iPhone selfie camera style, authentic and unpolished feel'"
+}}
+
+Return ONLY valid JSON."""
+
+    content.append({"type": "text", "text": prompt})
+
+    # Send product image in OpenRouter format
+    if product_images:
+        image_data, media_type = process_image(product_images[0], auto_resize=True)
+        if image_data:
+            content.append({"type": "text", "text": "\n## PRODUCT IMAGE (for reference)"})
+            content.append({
+                "type": "image_url",
+                "image_url": {
+                    "url": f"data:{media_type};base64,{image_data}"
                 },
             })
             logger.info("Added product image to prompt generation request")
@@ -329,3 +506,58 @@ def _format_library(library: dict[str, Any]) -> str:
 
     parts.append("")
     return "\n".join(parts)
+
+
+def _extract_impossible_interactions(product_mechanics: str) -> list[str]:
+    """
+    Extract bullet-point impossible interactions from mechanics prose.
+    """
+    if not product_mechanics:
+        return []
+
+    constraints: list[str] = []
+    in_section = False
+
+    for raw_line in product_mechanics.splitlines():
+        line = raw_line.strip()
+        if not line:
+            if in_section and constraints:
+                break
+            continue
+
+        if re.match(r"^impossible interactions\s*:?\s*$", line, flags=re.IGNORECASE):
+            in_section = True
+            continue
+
+        if in_section:
+            if line.startswith("-"):
+                item = line.lstrip("- ").strip()
+                if item:
+                    constraints.append(item)
+            elif constraints:
+                break
+
+    return constraints
+
+
+def _append_negative_constraints(video_prompt: str, negative_prompt: str) -> str:
+    """
+    Append forbidden-motion constraints to the generated video prompt.
+    """
+    if not negative_prompt.strip():
+        return video_prompt
+
+    negative_lines = []
+    for part in negative_prompt.split(";"):
+        cleaned = part.strip().strip(".")
+        if cleaned:
+            negative_lines.append(f"- {cleaned}")
+
+    if not negative_lines:
+        return video_prompt
+
+    return (
+        f"{video_prompt.strip()}\n\n"
+        "DO NOT SHOW:\n"
+        + "\n".join(negative_lines)
+    ).strip()

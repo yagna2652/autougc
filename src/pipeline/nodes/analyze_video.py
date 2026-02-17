@@ -1,8 +1,8 @@
 """
-Analyze Video Node - Simple Claude Vision analysis of TikTok video frames.
+Analyze Video Node - Vision analysis of TikTok video frames using OpenRouter.
 
-This node takes extracted frames from a TikTok video and uses Claude Vision
-to understand the video's style, content, and approach for recreation.
+This node takes extracted frames from a TikTok video and uses a vision model
+(via OpenRouter) to understand the video's style, content, and approach for recreation.
 
 All LLM calls are traced via LangSmith for full observability.
 """
@@ -10,13 +10,11 @@ All LLM calls are traced via LangSmith for full observability.
 import logging
 from typing import Any
 
-import anthropic
+from openai import OpenAI
 
 from src.pipeline.utils import (
     encode_image_file,
-    get_anthropic_client,
-    get_anthropic_client_with_timeout,
-    handle_api_error,
+    get_openrouter_client,
     handle_unexpected_error,
     parse_json_response,
 )
@@ -29,9 +27,9 @@ _ERROR_DEFAULTS = {"video_analysis": {}}
 
 def analyze_video_node(state: dict[str, Any]) -> dict[str, Any]:
     """
-    Analyze video frames using Claude Vision.
+    Analyze video frames using OpenRouter Vision.
 
-    Takes extracted frames and sends them to Claude Vision for analysis.
+    Takes extracted frames and sends them to a vision model via OpenRouter for analysis.
     Returns a simple, structured understanding of the video.
 
     Args:
@@ -49,10 +47,10 @@ def analyze_video_node(state: dict[str, Any]) -> dict[str, Any]:
             "error": "No frames to analyze",
         }
 
-    logger.info(f"    ↳ Analyzing {len(frames)} video frames with Claude Vision")
+    logger.info(f"    ↳ Analyzing {len(frames)} video frames with OpenRouter Vision")
 
-    # Get Anthropic client
-    client, model, error = get_anthropic_client(state, trace_name="analyze_video")
+    # Get OpenRouter client
+    client, model, error = get_openrouter_client(state, trace_name="analyze_video")
     if error:
         return {
             "video_analysis": {},
@@ -62,7 +60,7 @@ def analyze_video_node(state: dict[str, Any]) -> dict[str, Any]:
     try:
         # Build the message content with frames
         logger.info("    ↳ Building analysis content from frames...")
-        content = _build_analysis_content(frames)
+        content = _build_analysis_content_openrouter(frames)
 
         if not content:
             logger.error("    ↳ Failed to build content - no valid frames")
@@ -72,28 +70,89 @@ def analyze_video_node(state: dict[str, Any]) -> dict[str, Any]:
                 "current_step": "analysis_failed",
             }
 
-        logger.info(f"    ↳ Sending {len(content)} items to Claude Vision API...")
+        logger.info(f"    ↳ Sending {len(content)} items to OpenRouter Vision API...")
+        logger.info(f"    ↳ Using model: {model}")
 
-        # Call Claude Vision with timeout
-        api_client = get_anthropic_client_with_timeout(
-            timeout_seconds=120.0, connect_timeout=30.0
-        )
-        if not api_client:
+        # Call OpenRouter Vision API (OpenAI-compatible)
+        try:
+            response = client.chat.completions.create(
+                model=model,
+                messages=[{"role": "user", "content": content}],
+                max_tokens=2000,
+            )
+        except Exception as api_error:
+            logger.error(f"OpenRouter API error: {str(api_error)}")
+            error_msg = str(api_error)
+            if "insufficient credits" in error_msg.lower():
+                error_msg = "Insufficient credits on OpenRouter. Please add credits at https://openrouter.ai/credits"
             return {
                 "video_analysis": {},
-                "error": "ANTHROPIC_API_KEY not set",
+                "error": f"OpenRouter API error: {error_msg}",
+                "current_step": "analysis_failed",
             }
 
-        response = api_client.messages.create(
-            model=model,
-            max_tokens=2000,
-            messages=[{"role": "user", "content": content}],
-        )
+        logger.info("OpenRouter Vision response received")
 
-        logger.info("Claude Vision response received")
+        # Check for error field in response (OpenRouter-specific)
+        if hasattr(response, "error") and response.error:
+            error_msg = response.error.get("message", "Unknown error")
+            error_code = response.error.get("code", "N/A")
+            provider = response.error.get("metadata", {}).get(
+                "provider_name", "Unknown"
+            )
+            logger.error(
+                f"OpenRouter error: {error_msg} (Code: {error_code}, Provider: {provider})"
+            )
+            logger.error(f"Full error object: {response.error}")
 
-        # Parse response
-        response_text = response.content[0].text
+            # Try to get more details from metadata
+            if "metadata" in response.error:
+                logger.error(f"Error metadata: {response.error['metadata']}")
+
+            return {
+                "video_analysis": {},
+                "error": f"OpenRouter API error: {error_msg} (Provider: {provider})",
+                "current_step": "analysis_failed",
+            }
+
+        # Parse response with error handling
+        if not response.choices:
+            logger.error("No choices in response")
+            logger.error(f"Response object: {response}")
+            return {
+                "video_analysis": {},
+                "error": "No response choices from OpenRouter API",
+                "current_step": "analysis_failed",
+            }
+
+        message = response.choices[0].message
+        if not message:
+            logger.error("No message in response choice")
+            return {
+                "video_analysis": {},
+                "error": "No message in OpenRouter response",
+                "current_step": "analysis_failed",
+            }
+
+        response_text = message.content
+        if not response_text:
+            logger.error("No content in message")
+            logger.error(f"Message object: {message}")
+            # Check if there's a refusal or other field
+            if hasattr(message, "refusal") and message.refusal:
+                logger.error(f"Model refused: {message.refusal}")
+                return {
+                    "video_analysis": {},
+                    "error": f"Model refused: {message.refusal}",
+                    "current_step": "analysis_failed",
+                }
+            return {
+                "video_analysis": {},
+                "error": "Empty content from OpenRouter API",
+                "current_step": "analysis_failed",
+            }
+
+        logger.info(f"Response text length: {len(response_text)}")
         analysis = parse_json_response(response_text, context="video analysis")
 
         if not analysis:
@@ -112,21 +171,20 @@ def analyze_video_node(state: dict[str, Any]) -> dict[str, Any]:
             "current_step": "video_analyzed",
         }
 
-    except anthropic.APIError as e:
-        return handle_api_error(e, _ERROR_DEFAULTS, context="video analysis")
     except Exception as e:
+        logger.error(f"Error during video analysis: {str(e)}")
         return handle_unexpected_error(e, _ERROR_DEFAULTS, context="video analysis")
 
 
-def _build_analysis_content(frames: list[str]) -> list[dict[str, Any]]:
+def _build_analysis_content_openrouter(frames: list[str]) -> list[dict[str, Any]]:
     """
-    Build the content array for Claude Vision API.
+    Build the content array for OpenRouter Vision API (OpenAI-compatible format).
 
     Args:
         frames: List of frame file paths
 
     Returns:
-        Content array for Claude API
+        Content array for OpenRouter API
     """
     content = []
 
@@ -217,31 +275,28 @@ Return ONLY valid JSON."""
             }
         )
 
-        # Add the image
+        # Add the image in OpenAI/OpenRouter format
         logger.debug(f"Encoding frame: {frame_path}")
         image_data, media_type = encode_image_file(frame_path)
         if image_data:
             logger.debug(f"Frame encoded successfully: {len(image_data)} bytes")
+            # OpenRouter uses OpenAI-compatible format
             content.append(
                 {
-                    "type": "image",
-                    "source": {
-                        "type": "base64",
-                        "media_type": media_type,
-                        "data": image_data,
-                    },
+                    "type": "image_url",
+                    "image_url": {"url": f"data:{media_type};base64,{image_data}"},
                 }
             )
         else:
             logger.warning(f"Failed to encode frame: {frame_path}")
 
     # Check if we got at least one image
-    has_images = any(item.get("type") == "image" for item in content)
+    has_images = any(item.get("type") == "image_url" for item in content)
     if not has_images:
         logger.error("No frames could be encoded!")
         return []
 
     logger.info(
-        f"Successfully built content with {len([c for c in content if c.get('type') == 'image'])} images"
+        f"Successfully built content with {len([c for c in content if c.get('type') == 'image_url'])} images"
     )
     return content

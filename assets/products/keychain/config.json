@@ -1,0 +1,14 @@
+{
+  "name": "Mechanical Keyboard Keychain",
+  "description": "Compact mechanical keyboard keychain fidget clicker with satisfying tactile Cherry MX switches. Small enough to fit in your pocket, perfect for stress relief and fidgeting.",
+  "category": "mechanical_keyboard_keychain",
+  "mechanics": "4 keys in a single row (4x1 layout), approximately 7cm long and 1.5cm wide. Translucent smoky housing with blue Cherry MX-style switches visible inside. Metal chain with lobster clasp attached to one end. Person holds the body in one hand by wrapping fingers around the sides or cradling it in their palm. The other hand's index finger or thumb presses keys one at a time — fingertip lands squarely on the keycap surface, never outside the key boundaries. Each key has about 2mm of travel with a tactile click. Only one finger presses at a time. The keychain is small enough that two fingers side by side would cover two keys. Common interactions: single satisfying click, rapid tapping across the row left-to-right, holding and idly clicking one key, dangling from the chain then catching and clicking. The click sound is the hero moment — every press should feel intentional and land cleanly on a key.",
+  "grip": "Held by the non-dominant hand between thumb and middle/ring finger, with the product body stable and minimally rotating while the dominant index finger actuates one key at a time.",
+  "impossible_interactions": [
+    "two-handed full keyboard typing",
+    "simultaneous multi-finger chords on adjacent keys",
+    "pressing outside the keycaps or between switches",
+    "large wrist swings that cause the product to rotate dramatically",
+    "more key presses than physically possible within the beat timing"
+  ]
+}
