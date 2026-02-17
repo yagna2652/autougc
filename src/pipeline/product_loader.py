@@ -103,6 +103,9 @@ def _build_mechanics_text(config: dict[str, Any]) -> str:
     """
     base_mechanics = str(config.get("mechanics", "") or "").strip()
     grip = str(config.get("grip", "") or "").strip()
+    interaction_patterns = config.get("interaction_patterns", [])
+    timing = str(config.get("timing", "") or "").strip()
+    stationary = config.get("stationary_elements", [])
     impossible = config.get("impossible_interactions", [])
 
     sections: list[str] = []
@@ -110,7 +113,33 @@ def _build_mechanics_text(config: dict[str, Any]) -> str:
         sections.append(base_mechanics)
 
     if grip:
-        sections.append(f"Grip guidance:\n- {grip}")
+        sections.append(f"Grip:\n{grip}")
+
+    if isinstance(interaction_patterns, list) and interaction_patterns:
+        pattern_lines = []
+        for p in interaction_patterns:
+            if isinstance(p, dict):
+                name = p.get("name", "")
+                desc = p.get("description", "")
+                freq = p.get("frequency", "")
+                line = f"- {name}: {desc}"
+                if freq:
+                    line += f" ({freq})"
+                pattern_lines.append(line)
+        if pattern_lines:
+            sections.append("Interaction patterns:\n" + "\n".join(pattern_lines))
+
+    if timing:
+        sections.append(f"Timing:\n{timing}")
+
+    if isinstance(stationary, list) and stationary:
+        stationary_lines = [
+            f"- {item.strip()}"
+            for item in stationary
+            if isinstance(item, str) and item.strip()
+        ]
+        if stationary_lines:
+            sections.append("Stationary elements:\n" + "\n".join(stationary_lines))
 
     if isinstance(impossible, list) and impossible:
         impossible_lines = [
