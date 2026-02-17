@@ -17,6 +17,7 @@ import type {
 
 const PYTHON_API_URL = process.env.PYTHON_API_URL || "http://localhost:8000";
 const API_KEY = process.env.API_KEY || "";
+const START_REQUEST_TIMEOUT_MS = 210000; // 210s (~3.5 min)
 
 // Increase timeout for API route (Next.js config)
 export const maxDuration = 300; // 5 minutes
@@ -73,7 +74,10 @@ async function handleStart(
 
   // Create abort controller for timeout
   const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), 120000); // 120 second timeout
+  const timeoutId = setTimeout(
+    () => controller.abort(),
+    START_REQUEST_TIMEOUT_MS
+  );
 
   try {
     const response = await fetch(`${PYTHON_API_URL}/api/v1/pipeline/start`, {
