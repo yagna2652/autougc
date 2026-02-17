@@ -16,6 +16,18 @@ import type {
 } from "@/types/pipeline";
 
 const PYTHON_API_URL = process.env.PYTHON_API_URL || "http://localhost:8000";
+const API_KEY = process.env.API_KEY || "";
+
+// Increase timeout for API route (Next.js config)
+export const maxDuration = 300; // 5 minutes
+
+function getAuthHeaders(): Record<string, string> {
+  const headers: Record<string, string> = { "Content-Type": "application/json" };
+  if (API_KEY) {
+    headers["X-API-Key"] = API_KEY;
+  }
+  return headers;
+}
 
 export async function POST(request: NextRequest) {
   try {
@@ -48,67 +60,100 @@ async function handleStart(
     video_url: body.videoUrl,
     product_description: body.productDescription || "",
     product_images: body.productImages || [],
+    product_identity_pack: body.productIdentityPack,
     config: {
       video_model: body.videoModel || "sora",
+      use_identity_pack: body.useIdentityPack ?? false,
+      use_tail_image: body.useTailImage ?? false,
+      use_anchor_frames: body.useAnchorFrames ?? false,
+      segment_duration: body.segmentDuration ?? 2,
     },
   };
 
-  const response = await fetch(`${PYTHON_API_URL}/api/v1/pipeline/start`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(requestBody),
-  });
+  // Create abort controller for timeout
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 120000); // 120 second timeout
 
-  const data = await response.json();
+  try {
+    const response = await fetch(`${PYTHON_API_URL}/api/v1/pipeline/start`, {
+      method: "POST",
+      headers: getAuthHeaders(),
+      body: JSON.stringify(requestBody),
+      signal: controller.signal,
+    });
 
-  if (!response.ok) {
-    console.error("Pipeline start failed:", data);
-    return NextResponse.json(
-      { error: data.detail || "Failed to start pipeline" },
-      { status: response.status }
-    );
+    clearTimeout(timeoutId);
+
+    const data = await response.json();
+
+    if (!response.ok) {
+      console.error("Pipeline start failed:", data);
+      return NextResponse.json(
+        { error: data.detail || "Failed to start pipeline" },
+        { status: response.status }
+      );
+    }
+
+    return NextResponse.json({
+      success: true,
+      jobId: data.job_id,
+      status: data.status,
+      message: data.message,
+    });
+  } catch (error: any) {
+    clearTimeout(timeoutId);
+    if (error.name === 'AbortError') {
+      return NextResponse.json(
+        { error: "Request timeout - backend took too long to respond" },
+        { status: 504 }
+      );
+    }
+    throw error;
   }
-
-  return NextResponse.json({
-    success: true,
-    jobId: data.job_id,
-    status: data.status,
-    message: data.message,
-  });
 }
 
 async function handleStatus(
   body: StatusPipelineRequest
 ): Promise<NextResponse> {
-  const response = await fetch(
-    `${PYTHON_API_URL}/api/v1/pipeline/jobs/${body.jobId}`,
-    { method: "GET" }
-  );
+  try {
+    const response = await fetch(
+      `${PYTHON_API_URL}/api/v1/pipeline/jobs/${body.jobId}`,
+      {
+        method: "GET",
+        headers: getAuthHeaders(),
+      }
+    );
 
-  const data = await response.json();
+    const data = await response.json();
 
-  if (!response.ok) {
+    if (!response.ok) {
+      return NextResponse.json(
+        { error: data.detail || "Failed to get job status" },
+        { status: response.status }
+      );
+    }
+
+    // Map Python snake_case response to TypeScript camelCase with proper types
+    const result: Partial<PipelineResult> & { success: boolean } = {
+      success: true,
+      jobId: data.job_id,
+      status: data.status,
+      currentStep: data.current_step || "",
+      error: data.error || null,
+      videoAnalysis: (data.video_analysis || null) as VideoAnalysisData | null,
+      videoPrompt: data.video_prompt || "",
+      suggestedScript: data.suggested_script || "",
+      sceneImageUrl: data.scene_image_url || "",
+      generatedVideoUrl: data.generated_video_url || "",
+    };
+
+    return NextResponse.json(result);
+  } catch {
     return NextResponse.json(
-      { error: data.detail || "Failed to get job status" },
-      { status: response.status }
+      { error: "Backend not reachable", status: "running", currentStep: "waiting" },
+      { status: 502 }
     );
   }
-
-  // Map Python snake_case response to TypeScript camelCase with proper types
-  const result: Partial<PipelineResult> & { success: boolean } = {
-    success: true,
-    jobId: data.job_id,
-    status: data.status,
-    currentStep: data.current_step || "",
-    error: data.error || null,
-    videoAnalysis: (data.video_analysis || null) as VideoAnalysisData | null,
-    videoPrompt: data.video_prompt || "",
-    suggestedScript: data.suggested_script || "",
-    sceneImageUrl: data.scene_image_url || "",
-    generatedVideoUrl: data.generated_video_url || "",
-  };
-
-  return NextResponse.json(result);
 }
 
 export async function GET(): Promise<NextResponse> {
