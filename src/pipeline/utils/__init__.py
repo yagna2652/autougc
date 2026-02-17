@@ -2,17 +2,17 @@
 Pipeline Utilities - Helper functions for pipeline nodes.
 """
 
-from src.pipeline.utils.anthropic_utils import (
-    get_anthropic_client,
-    get_anthropic_client_with_timeout,
+from src.pipeline.utils.openrouter_utils import (
+    get_openrouter_client,
+    get_vision_model,
 )
 from src.pipeline.utils.config_helpers import (
     DEFAULT_ASPECT_RATIO,
-    DEFAULT_CLAUDE_MODEL,
+    DEFAULT_VISION_MODEL,
     DEFAULT_VIDEO_DURATION,
     DEFAULT_VIDEO_MODEL,
     get_aspect_ratio,
-    get_claude_model,
+    get_config_vision_model,
     get_i2v_image_index,
     get_num_frames,
     get_product_description,
@@ -36,16 +36,20 @@ from src.pipeline.utils.image_utils import (
     resize_image,
 )
 from src.pipeline.utils.interaction_library import (
+    resolve_clip_ids_to_plain_language,
     load_interaction_library,
+)
+from src.pipeline.utils.identity_selector import (
+    select_identity_references,
 )
 from src.pipeline.utils.json_utils import parse_json_response
 
 __all__ = [
-    # Anthropic utilities
-    "get_anthropic_client",
-    "get_anthropic_client_with_timeout",
+    # OpenRouter utilities
+    "get_openrouter_client",
+    "get_vision_model",
     # Config helpers
-    "get_claude_model",
+    "get_config_vision_model",
     "get_video_model",
     "get_num_frames",
     "get_video_duration",
@@ -54,7 +58,7 @@ __all__ = [
     "get_product_description",
     "get_product_images",
     "validate_config",
-    "DEFAULT_CLAUDE_MODEL",
+    "DEFAULT_VISION_MODEL",
     "DEFAULT_VIDEO_MODEL",
     "DEFAULT_VIDEO_DURATION",
     "DEFAULT_ASPECT_RATIO",
@@ -73,6 +77,8 @@ __all__ = [
     "parse_json_response",
     # Interaction library
     "load_interaction_library",
+    "resolve_clip_ids_to_plain_language",
+    "select_identity_references",
     # FAL upload
     "upload_image_to_fal",
 ]
