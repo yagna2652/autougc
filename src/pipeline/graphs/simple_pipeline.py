@@ -4,7 +4,7 @@ Simple UGC Pipeline - LangGraph workflow for video generation.
 A clean, minimal pipeline:
 1. Download TikTok video
 2. Extract frames
-3. Analyze with Claude Vision
+3. Analyze with vision model (OpenRouter)
 4. Generate video prompt
 5. Generate scene image (composite product into TikTok-style scene)
 6. Generate video
@@ -17,8 +17,9 @@ from functools import wraps
 from typing import Any, Callable, Literal
 
 from langgraph.graph import END, START, StateGraph
+from langchain_core.runnables import RunnableConfig
 
-from src.pipeline.state import PipelineState
+from src.pipeline.state import PipelineState, _serialize_for_langsmith
 
 logger = logging.getLogger(__name__)
 
@@ -36,7 +37,7 @@ from src.pipeline.nodes.generate_video import generate_video_node
 NODE_DESCRIPTIONS = {
     "download_video": "Downloading TikTok video",
     "extract_frames": "Extracting key frames from video",
-    "analyze_video": "Analyzing video style with Claude Vision",
+    "analyze_video": "Analyzing video style with vision model",
     "generate_prompt": "Generating video prompt",
     "generate_scene_image": "Generating scene image (Nano Banana Pro)",
     "generate_video": "Generating video (this takes 2-5 minutes)",
@@ -82,12 +83,25 @@ def build_pipeline() -> StateGraph:
     workflow = StateGraph(PipelineState)
 
     # Add nodes with logging wrappers
-    workflow.add_node("download_video", with_logging("download_video", download_video_node))
-    workflow.add_node("extract_frames", with_logging("extract_frames", extract_frames_node))
-    workflow.add_node("analyze_video", with_logging("analyze_video", analyze_video_node))
-    workflow.add_node("generate_prompt", with_logging("generate_prompt", generate_prompt_node))
-    workflow.add_node("generate_scene_image", with_logging("generate_scene_image", generate_scene_image_node))
-    workflow.add_node("generate_video", with_logging("generate_video", generate_video_node))
+    workflow.add_node(
+        "download_video", with_logging("download_video", download_video_node)
+    )
+    workflow.add_node(
+        "extract_frames", with_logging("extract_frames", extract_frames_node)
+    )
+    workflow.add_node(
+        "analyze_video", with_logging("analyze_video", analyze_video_node)
+    )
+    workflow.add_node(
+        "generate_prompt", with_logging("generate_prompt", generate_prompt_node)
+    )
+    workflow.add_node(
+        "generate_scene_image",
+        with_logging("generate_scene_image", generate_scene_image_node),
+    )
+    workflow.add_node(
+        "generate_video", with_logging("generate_video", generate_video_node)
+    )
 
     # Define the flow
     workflow.add_edge(START, "download_video")
