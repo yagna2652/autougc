@@ -8,16 +8,41 @@ Endpoints:
 """
 
 import logging
+import os
 import uuid
 from datetime import datetime
 from typing import Any, Optional
 
-from fastapi import APIRouter, BackgroundTasks, HTTPException
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Header
 from pydantic import BaseModel, Field
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
+
+
+# =============================================================================
+# SIMPLE API KEY AUTH
+# =============================================================================
+
+
+def verify_api_key(x_api_key: str = Header(None, alias="X-API-Key")) -> str:
+    """Verify the API key from request header."""
+    expected_key = os.getenv("API_KEY")
+
+    # If no API_KEY configured, allow all requests (dev mode)
+    if not expected_key:
+        return "no-key-configured"
+
+    if not x_api_key:
+        raise HTTPException(
+            status_code=401, detail="Missing API key. Include X-API-Key header."
+        )
+
+    if x_api_key != expected_key:
+        raise HTTPException(status_code=403, detail="Invalid API key.")
+
+    return x_api_key
 
 
 # =============================================================================
@@ -66,18 +91,48 @@ job_store = JobStore()
 # =============================================================================
 
 
+class ProductIdentityPack(BaseModel):
+    """Multi-angle product reference images for identity fidelity."""
+
+    front: str = Field(default="", description="Front view image (base64 or URL)")
+    side_45: str = Field(default="", description="45-degree angle view")
+    back: str = Field(default="", description="Back view")
+    top: str = Field(default="", description="Top view")
+    close_up_logo: str = Field(default="", description="Close-up of logo/markings")
+    close_up_material: str = Field(
+        default="", description="Close-up of material texture"
+    )
+
+
 class PipelineConfigModel(BaseModel):
     """Pipeline configuration options."""
 
-    claude_model: str = Field(
-        default="claude-sonnet-4-20250514", description="Claude model to use"
+    vision_model: str = Field(
+        default="openai/gpt-4o-mini", description="OpenRouter vision model to use"
     )
     num_frames: int = Field(default=5, description="Number of frames to extract")
-    video_model: str = Field(default="sora", description="Video model (sora or kling)")
+    video_model: str = Field(
+        default="sora", description="Video model (sora, kling, or kling-v3)"
+    )
     video_duration: int = Field(default=5, description="Video duration in seconds")
     aspect_ratio: str = Field(default="9:16", description="Video aspect ratio")
     i2v_image_index: int = Field(
         default=0, description="Which product image to use for I2V (0-indexed)"
+    )
+
+    # Identity fidelity controls (fastest gains from research report)
+    use_identity_pack: bool = Field(
+        default=False, description="Enable multi-reference identity pack"
+    )
+    use_tail_image: bool = Field(
+        default=False, description="Use same image as end frame for consistency"
+    )
+    segment_duration: int = Field(
+        default=2,
+        description="Duration per segment for anchor strategy (2-3s recommended)",
+    )
+    use_anchor_frames: bool = Field(
+        default=False, description="Generate keyframes first, then motion segments"
     )
 
 
@@ -98,9 +153,17 @@ class StartPipelineRequest(BaseModel):
         default_factory=list,
         description="Product images as base64 or URLs (auto-loaded if empty)",
     )
+    product_identity_pack: Optional[ProductIdentityPack] = Field(
+        default=None,
+        description="Multi-angle product reference images for identity fidelity",
+    )
     product_category: Optional[str] = Field(
         default=None,
         description="Product category (auto-detected if not provided)",
+    )
+    product_mechanics: str = Field(
+        default="",
+        description="Physical interaction rules/mechanics (auto-loaded if empty)",
     )
     config: Optional[PipelineConfigModel] = Field(
         default=None, description="Pipeline configuration"
@@ -141,8 +204,8 @@ class JobStatusResponse(BaseModel):
 STEP_DESCRIPTIONS = {
     "download_video": "Downloading TikTok video...",
     "extract_frames": "Extracting key frames from video...",
-    "analyze_video": "Analyzing video style with Claude Vision...",
-    "generate_prompt": "Generating video prompt with Claude...",
+    "analyze_video": "Analyzing video style with vision model...",
+    "generate_prompt": "Generating video prompt...",
     "generate_scene_image": "Generating scene image with Nano Banana Pro...",
     "generate_video": "Generating video with AI (this may take 2-5 minutes)...",
 }
@@ -159,9 +222,9 @@ async def run_pipeline_async(job_id: str, initial_state: dict[str, Any]) -> None
     from src.pipeline import stream_pipeline
 
     try:
-        logger.info(f"{'='*60}")
+        logger.info(f"{'=' * 60}")
         logger.info(f"PIPELINE STARTED | Job: {job_id[:8]}...")
-        logger.info(f"{'='*60}")
+        logger.info(f"{'=' * 60}")
 
         # Update status to running
         job_store.update(job_id, {"status": "running"})
@@ -197,12 +260,18 @@ async def run_pipeline_async(job_id: str, initial_state: dict[str, Any]) -> None
                 # Show first 100 chars of prompt
                 logger.info(f"    → Preview: {prompt[:100]}...")
                 if state_update.get("scene_description"):
-                    logger.info(f"    → Scene description: {state_update['scene_description'][:100]}...")
+                    logger.info(
+                        f"    → Scene description: {state_update['scene_description'][:100]}..."
+                    )
 
-            if node_name == "generate_scene_image" and state_update.get("scene_image_url"):
+            if node_name == "generate_scene_image" and state_update.get(
+                "scene_image_url"
+            ):
                 logger.info(f"    → Scene image URL: {state_update['scene_image_url']}")
 
-            if node_name == "generate_video" and state_update.get("generated_video_url"):
+            if node_name == "generate_video" and state_update.get(
+                "generated_video_url"
+            ):
                 logger.info(f"    → Video URL: {state_update['generated_video_url']}")
 
             # Update job store with each state update
@@ -211,10 +280,10 @@ async def run_pipeline_async(job_id: str, initial_state: dict[str, Any]) -> None
             # Check for errors
             if state_update.get("error"):
                 logger.error(f"")
-                logger.error(f"{'='*60}")
+                logger.error(f"{'=' * 60}")
                 logger.error(f"PIPELINE FAILED at {node_name}")
                 logger.error(f"Error: {state_update.get('error')}")
-                logger.error(f"{'='*60}")
+                logger.error(f"{'=' * 60}")
                 job_store.update(job_id, {"status": "failed"})
                 return
 
@@ -236,17 +305,17 @@ async def run_pipeline_async(job_id: str, initial_state: dict[str, Any]) -> None
             },
         )
         logger.info(f"")
-        logger.info(f"{'='*60}")
+        logger.info(f"{'=' * 60}")
         logger.info(f"PIPELINE COMPLETED | Job: {job_id[:8]}...")
-        logger.info(f"{'='*60}")
+        logger.info(f"{'=' * 60}")
 
     except Exception as e:
         logger.exception(f"Pipeline error for job {job_id}")
         logger.error(f"")
-        logger.error(f"{'='*60}")
+        logger.error(f"{'=' * 60}")
         logger.error(f"PIPELINE CRASHED | Job: {job_id[:8]}...")
         logger.error(f"Exception: {str(e)}")
-        logger.error(f"{'='*60}")
+        logger.error(f"{'=' * 60}")
         job_store.update(
             job_id,
             {
@@ -265,6 +334,7 @@ async def run_pipeline_async(job_id: str, initial_state: dict[str, Any]) -> None
 async def start_pipeline(
     request: StartPipelineRequest,
     background_tasks: BackgroundTasks,
+    _: str = Depends(verify_api_key),
 ):
     """
     Start the UGC generation pipeline.
@@ -290,11 +360,18 @@ async def start_pipeline(
 
         # Create initial state
         # If product info not provided, create_initial_state will auto-load default
+        identity_pack = (
+            request.product_identity_pack.model_dump()
+            if request.product_identity_pack
+            else None
+        )
         initial_state = create_initial_state(
             video_url=request.video_url,
             product_description=request.product_description,
             product_images=request.product_images,
+            product_identity_pack=identity_pack,
             product_category=request.product_category,  # None triggers auto-load
+            product_mechanics=request.product_mechanics,
             config=config,
             job_id=job_id,
         )
@@ -319,7 +396,10 @@ async def start_pipeline(
 
 
 @router.get("/pipeline/jobs/{job_id}", response_model=JobStatusResponse)
-async def get_job_status(job_id: str):
+async def get_job_status(
+    job_id: str,
+    _: str = Depends(verify_api_key),
+):
     """
     Get the status of a pipeline job.
 
@@ -354,7 +434,10 @@ async def get_job_status(job_id: str):
 
 
 @router.delete("/pipeline/jobs/{job_id}")
-async def delete_job(job_id: str):
+async def delete_job(
+    job_id: str,
+    _: str = Depends(verify_api_key),
+):
     """Delete a job from storage."""
     if job_store.delete(job_id):
         return {"status": "deleted", "job_id": job_id}
@@ -375,8 +458,9 @@ async def pipeline_health():
     return {
         "status": "ok",
         "tracing_enabled": is_tracing_enabled(),
+        "auth_enabled": bool(os.getenv("API_KEY")),
         "api_keys": {
-            "anthropic": bool(os.getenv("ANTHROPIC_API_KEY")),
+            "openrouter": bool(os.getenv("OPENROUTER_API_KEY")),
             "fal": bool(os.getenv("FAL_KEY")),
             "langsmith": bool(os.getenv("LANGCHAIN_API_KEY")),
         },

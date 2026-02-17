@@ -9,6 +9,7 @@ Provides functions to:
 
 import json
 import logging
+import re
 from pathlib import Path
 from typing import Any
 
@@ -196,3 +197,65 @@ def validate_interaction_plan(plan: dict[str, Any]) -> tuple[bool, list[str]]:
 
     is_valid = len(errors) == 0
     return is_valid, errors
+
+
+def resolve_clip_ids_to_plain_language(
+    text: str,
+    library: dict[str, Any],
+) -> str:
+    """
+    Replace interaction clip IDs in text with plain-language motion phrases.
+
+    Example:
+        "Use mkc_closeup_click_loop_01"
+        -> "Use a macro close-up click loop with tactile product demonstration"
+    """
+    if not text:
+        return text
+
+    clips = library.get("clips", [])
+    primitives_registry = library.get("primitives_registry", {})
+    if not clips:
+        return text
+
+    resolved = text
+
+    # Replace longer IDs first to avoid partial collisions.
+    clip_ids = sorted(
+        [clip.get("id", "") for clip in clips if clip.get("id")],
+        key=len,
+        reverse=True,
+    )
+
+    clip_by_id = {
+        clip.get("id"): clip for clip in clips if clip.get("id")
+    }
+
+    for clip_id in clip_ids:
+        clip = clip_by_id.get(clip_id, {})
+        primitive = clip.get("primitive", "")
+        framing = str(clip.get("framing", "")).replace("_", " ").strip()
+        tags = clip.get("tags", []) or []
+        primitive_desc = primitives_registry.get(primitive, {}).get("description", "")
+
+        phrase_parts = []
+        if framing:
+            phrase_parts.append(f"a {framing} sequence")
+        if primitive_desc:
+            phrase_parts.append(primitive_desc.lower())
+        elif primitive:
+            phrase_parts.append(primitive.replace("_", " "))
+        if tags:
+            phrase_parts.append(
+                "with " + ", ".join(str(tag).replace("_", " ") for tag in tags[:2])
+            )
+
+        replacement = " ".join(phrase_parts).strip()
+        if not replacement:
+            replacement = "a product interaction sequence"
+
+        resolved = re.sub(rf"\b{re.escape(clip_id)}\b", replacement, resolved)
+
+    # Cleanup
+    resolved = re.sub(r"\s+", " ", resolved).strip()
+    return resolved

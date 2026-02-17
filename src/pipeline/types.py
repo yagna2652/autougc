@@ -32,7 +32,7 @@ class PersonInfo(TypedDict, total=False):
 
 class VideoAnalysisData(TypedDict, total=False):
     """
-    Output from analyze_video node - Claude Vision analysis of video frames.
+    Output from analyze_video node - Vision model analysis of video frames.
 
     Contains detailed breakdown of the video's visual style, setting,
     and characteristics for recreation.
@@ -58,12 +58,29 @@ class VideoAnalysisData(TypedDict, total=False):
 # =============================================================================
 
 
+class ProductReference(TypedDict, total=False):
+    """Product identity pack - multi-angle reference images for SKU."""
+
+    front: str  # Front view image (base64 or URL)
+    side_45: str  # 45-degree angle view
+    back: str  # Back view
+    top: str  # Top view
+    close_up_logo: str  # Close-up of logo/markings
+    close_up_material: str  # Close-up of material texture
+
+
 class PipelineConfig(TypedDict, total=False):
     """Configuration options for the pipeline."""
 
-    claude_model: str  # e.g., "claude-sonnet-4-20250514"
+    vision_model: str  # e.g., "openai/gpt-4o-mini"
     num_frames: int  # Number of frames to extract
-    video_model: Literal["sora", "kling"] | str
+    video_model: Literal["sora", "kling", "kling-v3"] | str
     video_duration: int  # Duration in seconds
     aspect_ratio: str  # e.g., "9:16"
     i2v_image_index: int  # Which product image to use for I2V
+
+    # Identity fidelity controls (fastest gains)
+    use_identity_pack: bool  # Enable multi-reference identity pack
+    use_tail_image: bool  # Use same image as end frame (forces consistency)
+    segment_duration: int  # Duration per segment for anchor strategy (2-3s)
+    use_anchor_frames: bool  # Generate keyframes first, then motion

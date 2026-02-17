@@ -1,135 +1,134 @@
-# AutoUGC - TikTok/Reel Analyzer & UGC Ad Generator
+# AutoUGC
 
-Automated pipeline for analyzing TikTok/Reels videos and generating UGC-style ads.
+Reference-video-to-UGC pipeline for generating product ad videos.
 
-## Phase 1: Video Analyzer
+AutoUGC takes:
+- a TikTok/Reel URL (style reference)
+- product image(s) (required)
+- optional product description/category
 
-Extracts a structured "blueprint" from any TikTok/Reel video, capturing everything needed to recreate it:
+and produces:
+- structured style analysis
+- a motion-focused generation prompt + short script
+- a generated vertical ad video (Sora/Kling via Fal)
 
-- **Transcript** with timestamps
-- **Structure** (Hook / Body / CTA breakdown)
-- **Visual Style** (setting, lighting, framing, avatar, colors)
-- **Audio Style** (tone, pacing, music)
-- **Engagement Analysis** (what makes it work)
+## Source Of Truth
 
-## Installation
+Architecture and runtime behavior are canonical in:
+- `docs/ARCHITECTURE.md`
 
-### Prerequisites
+If another document conflicts with that file, follow `docs/ARCHITECTURE.md`.
+
+## Current Architecture
+
+- Backend: FastAPI (`api/server.py`)
+- Pipeline engine: LangGraph (`src/pipeline/graphs/simple_pipeline.py`)
+- Frontend: Next.js (`web/`)
+- External services:
+  - OpenRouter (vision + text model calls)
+  - Fal.ai (scene image + image-to-video generation)
+  - yt-dlp + ffmpeg/ffprobe (video download + frame extraction)
+
+Pipeline steps:
+1. `download_video`
+2. `extract_frames`
+3. `analyze_video`
+4. `generate_prompt`
+5. `generate_scene_image`
+6. `generate_video`
+
+## Prerequisites
 
 - Python 3.11+
-- ffmpeg (for audio/video processing)
+- Node.js 18+
+- `ffmpeg` and `ffprobe` in `PATH`
 
-#### Install ffmpeg
+## Setup
 
-```bash
-# macOS
-brew install ffmpeg
-
-# Ubuntu/Debian
-sudo apt install ffmpeg
-
-# Windows
-# Download from https://ffmpeg.org/download.html
-```
-
-### Setup
+### 1. Python environment
 
 ```bash
-# Clone the repository
-cd autougc
-
-# Create virtual environment
-python -m venv venv
-source venv/bin/activate  # On Windows: venv\Scripts\activate
-
-# Install dependencies
-pip install -e ".[dev]"
-
-# Copy environment variables
-cp .env.example .env
-# Edit .env and add your API keys
+python3 -m venv venv
+source venv/bin/activate
+pip install -r requirements.txt -r requirements-api.txt
 ```
 
-### API Keys Required
-
-- **Anthropic API Key** (required): For Claude Vision and text analysis
-- **OpenAI API Key** (optional): Only if using Whisper API instead of local
-
-## Usage
+### 2. Frontend dependencies
 
 ```bash
-# Analyze a video
-python -m src.cli analyze input/video.mp4
-
-# Specify output path
-python -m src.cli analyze input/video.mp4 -o output/my_blueprint.json
-
-# Use Whisper API instead of local
-python -m src.cli analyze input/video.mp4 --whisper-mode api
+cd web
+npm install
+cd ..
 ```
 
-## Project Structure
+### 3. Environment variables
 
-```
-autougc/
-├── src/
-│   ├── __init__.py
-│   ├── cli.py                    # Command-line interface
-│   ├── analyzer/
-│   │   ├── __init__.py
-│   │   ├── audio_extractor.py    # Extract audio from video (ffmpeg)
-│   │   ├── transcriber.py        # Speech-to-text (Whisper)
-│   │   ├── frame_extractor.py    # Extract key frames
-│   │   ├── visual_analyzer.py    # Analyze visuals (Claude Vision)
-│   │   ├── structure_parser.py   # Parse Hook/Body/CTA
-│   │   └── blueprint_generator.py # Orchestrator
-│   └── models/
-│       ├── __init__.py
-│       └── blueprint.py          # Pydantic data models
-├── tests/
-├── input/                        # Place videos here
-├── output/                       # Generated blueprints
-├── requirements.txt
-├── pyproject.toml
-└── README.md
-```
-
-## Output: Video Blueprint
-
-The analyzer outputs a JSON blueprint containing:
-
-```json
-{
-  "source_video": "video.mp4",
-  "duration_seconds": 28.5,
-  "transcript": {
-    "full_text": "...",
-    "segments": [{ "start": 0.0, "end": 2.5, "text": "..." }]
-  },
-  "structure": {
-    "hook": { "start": 0.0, "end": 3.0, "text": "...", "style": "pov_trend" },
-    "body": { "start": 3.0, "end": 25.0, "text": "...", "framework": "testimonial" },
-    "cta": { "start": 25.0, "end": 28.5, "text": "...", "urgency": "soft" }
-  },
-  "visual_style": { ... },
-  "audio_style": { ... },
-  "engagement_analysis": { ... }
-}
-```
-
-## Development
+Create root `.env`:
 
 ```bash
-# Run tests
-pytest
-
-# Type checking
-mypy src/
-
-# Linting
-ruff check src/
+OPENROUTER_API_KEY=your_openrouter_key
+FAL_KEY=your_fal_key
 ```
 
-## License
+Optional tracing:
 
-MIT
+```bash
+LANGCHAIN_TRACING_V2=true
+LANGCHAIN_API_KEY=your_langsmith_key
+LANGCHAIN_PROJECT=autougc-pipeline
+```
+
+Create `web/.env.local`:
+
+```bash
+PYTHON_API_URL=http://localhost:8000
+```
+
+## Run (Development)
+
+Option A: helper scripts
+
+```bash
+./start-dev.sh
+```
+
+Stops both servers:
+
+```bash
+./stop-dev.sh
+```
+
+Option B: manual terminals
+
+Terminal 1:
+
+```bash
+source venv/bin/activate
+python -m uvicorn api.server:app --reload --port 8000
+```
+
+Terminal 2:
+
+```bash
+cd web
+npm run dev
+```
+
+## API (Current)
+
+Backend:
+- `GET /health`
+- `POST /api/v1/pipeline/start`
+- `GET /api/v1/pipeline/jobs/{job_id}`
+- `DELETE /api/v1/pipeline/jobs/{job_id}`
+- `GET /api/v1/pipeline/health`
+
+Frontend proxy:
+- `POST /api/pipeline` (`action: "start"` or `"status"`)
+- `GET /api/pipeline` (health passthrough)
+
+## Notes
+
+- Product images are required in the current implementation.
+- Jobs are stored in-memory (non-persistent).
+- Video generation depends on available Fal/OpenRouter credits.

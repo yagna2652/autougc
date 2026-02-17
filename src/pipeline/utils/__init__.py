@@ -1,84 +1,63 @@
 """
-Pipeline Utilities - Helper functions for pipeline nodes.
+Pipeline Utilities - Helper function exports with lazy loading.
+
+This module intentionally avoids eager imports so lightweight callers
+(including tests) don't pull in the full pipeline dependency graph.
 """
 
-from src.pipeline.utils.openrouter_utils import (
-    get_openrouter_client,
-    get_vision_model,
-)
-from src.pipeline.utils.config_helpers import (
-    DEFAULT_ASPECT_RATIO,
-    DEFAULT_VISION_MODEL,
-    DEFAULT_VIDEO_DURATION,
-    DEFAULT_VIDEO_MODEL,
-    get_aspect_ratio,
-    get_config_vision_model,
-    get_i2v_image_index,
-    get_num_frames,
-    get_product_description,
-    get_product_images,
-    get_video_duration,
-    get_video_model,
-    validate_config,
-)
-from src.pipeline.utils.error_handling import (
-    build_error_result,
-    handle_api_error,
-    handle_unexpected_error,
-    node_error_handler,
-    with_error_handling,
-)
-from src.pipeline.utils.fal_upload import upload_image_to_fal
-from src.pipeline.utils.image_utils import (
-    download_image,
-    encode_image_file,
-    process_image,
-    resize_image,
-)
-from src.pipeline.utils.interaction_library import (
-    resolve_clip_ids_to_plain_language,
-    load_interaction_library,
-)
-from src.pipeline.utils.identity_selector import (
-    select_identity_references,
-)
-from src.pipeline.utils.json_utils import parse_json_response
+from importlib import import_module
+from typing import Any
 
-__all__ = [
+_EXPORT_MAP = {
     # OpenRouter utilities
-    "get_openrouter_client",
-    "get_vision_model",
+    "get_openrouter_client": ("src.pipeline.utils.openrouter_utils", "get_openrouter_client"),
+    "get_vision_model": ("src.pipeline.utils.openrouter_utils", "get_vision_model"),
     # Config helpers
-    "get_config_vision_model",
-    "get_video_model",
-    "get_num_frames",
-    "get_video_duration",
-    "get_aspect_ratio",
-    "get_i2v_image_index",
-    "get_product_description",
-    "get_product_images",
-    "validate_config",
-    "DEFAULT_VISION_MODEL",
-    "DEFAULT_VIDEO_MODEL",
-    "DEFAULT_VIDEO_DURATION",
-    "DEFAULT_ASPECT_RATIO",
+    "get_config_vision_model": ("src.pipeline.utils.config_helpers", "get_config_vision_model"),
+    "get_video_model": ("src.pipeline.utils.config_helpers", "get_video_model"),
+    "get_num_frames": ("src.pipeline.utils.config_helpers", "get_num_frames"),
+    "get_video_duration": ("src.pipeline.utils.config_helpers", "get_video_duration"),
+    "get_aspect_ratio": ("src.pipeline.utils.config_helpers", "get_aspect_ratio"),
+    "get_i2v_image_index": ("src.pipeline.utils.config_helpers", "get_i2v_image_index"),
+    "get_product_description": ("src.pipeline.utils.config_helpers", "get_product_description"),
+    "get_product_images": ("src.pipeline.utils.config_helpers", "get_product_images"),
+    "validate_config": ("src.pipeline.utils.config_helpers", "validate_config"),
+    "DEFAULT_VISION_MODEL": ("src.pipeline.utils.config_helpers", "DEFAULT_VISION_MODEL"),
+    "DEFAULT_VIDEO_MODEL": ("src.pipeline.utils.config_helpers", "DEFAULT_VIDEO_MODEL"),
+    "DEFAULT_VIDEO_DURATION": ("src.pipeline.utils.config_helpers", "DEFAULT_VIDEO_DURATION"),
+    "DEFAULT_ASPECT_RATIO": ("src.pipeline.utils.config_helpers", "DEFAULT_ASPECT_RATIO"),
     # Error handling
-    "build_error_result",
-    "handle_api_error",
-    "handle_unexpected_error",
-    "node_error_handler",
-    "with_error_handling",
+    "build_error_result": ("src.pipeline.utils.error_handling", "build_error_result"),
+    "handle_api_error": ("src.pipeline.utils.error_handling", "handle_api_error"),
+    "handle_unexpected_error": ("src.pipeline.utils.error_handling", "handle_unexpected_error"),
+    "node_error_handler": ("src.pipeline.utils.error_handling", "node_error_handler"),
+    "with_error_handling": ("src.pipeline.utils.error_handling", "with_error_handling"),
     # Image utilities
-    "process_image",
-    "download_image",
-    "resize_image",
-    "encode_image_file",
+    "process_image": ("src.pipeline.utils.image_utils", "process_image"),
+    "download_image": ("src.pipeline.utils.image_utils", "download_image"),
+    "resize_image": ("src.pipeline.utils.image_utils", "resize_image"),
+    "encode_image_file": ("src.pipeline.utils.image_utils", "encode_image_file"),
     # JSON utilities
-    "parse_json_response",
+    "parse_json_response": ("src.pipeline.utils.json_utils", "parse_json_response"),
     # Interaction library
-    "load_interaction_library",
-    "resolve_clip_ids_to_plain_language",
-    "select_identity_references",
+    "load_interaction_library": ("src.pipeline.utils.interaction_library", "load_interaction_library"),
+    "resolve_clip_ids_to_plain_language": ("src.pipeline.utils.interaction_library", "resolve_clip_ids_to_plain_language"),
+    "select_identity_references": ("src.pipeline.utils.identity_selector", "select_identity_references"),
     # FAL upload
-    "upload_image_to_fal",
-]
+    "upload_image_to_fal": ("src.pipeline.utils.fal_upload", "upload_image_to_fal"),
+}
+
+
+def __getattr__(name: str) -> Any:
+    try:
+        module_path, attr_name = _EXPORT_MAP[name]
+    except KeyError as exc:
+        raise AttributeError(f"module {__name__!r} has no attribute {name!r}") from exc
+
+    module = import_module(module_path)
+    value = getattr(module, attr_name)
+    globals()[name] = value
+    return value
+
+
+__all__ = list(_EXPORT_MAP.keys())

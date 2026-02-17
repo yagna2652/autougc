@@ -59,6 +59,7 @@ async function handleStart(
   const requestBody = {
     video_url: body.videoUrl,
     product_description: body.productDescription || "",
+    product_mechanics: body.productMechanics || "",
     product_images: body.productImages || [],
     product_identity_pack: body.productIdentityPack,
     config: {

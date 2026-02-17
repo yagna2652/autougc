@@ -1,34 +1,33 @@
 # AutoUGC Setup Guide
 
-Complete setup instructions for running the full AutoUGC system with TikTok analysis.
+This guide is for running the current AutoUGC stack locally.
 
-## Architecture
+Canonical architecture reference:
+- `docs/ARCHITECTURE.md`
 
-The system consists of two servers:
+## 1. Prerequisites
 
-1. **FastAPI Backend** (Port 8000) - Python-based TikTok video analyzer
-2. **Next.js Frontend** (Port 3000) - Web UI for the complete workflow
-
-## Prerequisites
-
-- Python 3.9+
+- Python 3.11+
 - Node.js 18+
-- FFmpeg (for video processing)
-- Anthropic API Key
+- `ffmpeg` + `ffprobe` installed and available in `PATH`
 
-## Installation
-
-### 1. Install Python Dependencies
+Install ffmpeg (macOS):
 
 ```bash
-# Install core dependencies
-pip install -r requirements.txt
-
-# Install API server dependencies
-pip install -r requirements-api.txt
+brew install ffmpeg
 ```
 
-### 2. Install Node Dependencies
+## 2. Install Dependencies
+
+From repo root:
+
+```bash
+python3 -m venv venv
+source venv/bin/activate
+pip install -r requirements.txt -r requirements-api.txt
+```
+
+Frontend:
 
 ```bash
 cd web
@@ -36,188 +35,153 @@ npm install
 cd ..
 ```
 
-### 3. Configure Environment Variables
+## 3. Configure Environment
 
-The `.env` file in the root directory should have:
+### 3.1 Root `.env`
+
+Required keys for full pipeline:
+
 ```bash
-ANTHROPIC_API_KEY=your_anthropic_key_here
+OPENROUTER_API_KEY=your_openrouter_key
+FAL_KEY=your_fal_key
 ```
 
-The `web/.env.local` file should have:
+Optional (LangSmith tracing):
+
 ```bash
-FAL_KEY=your_fal_key_here
-ANTHROPIC_API_KEY=your_anthropic_key_here
-FASTAPI_URL=http://localhost:8000
+LANGCHAIN_TRACING_V2=true
+LANGCHAIN_API_KEY=your_langsmith_key
+LANGCHAIN_PROJECT=autougc-pipeline
 ```
 
-## Running the System
-
-You need to run **both servers simultaneously** in separate terminals.
-
-### Terminal 1: Start FastAPI Backend
+### 3.2 Frontend `web/.env.local`
 
 ```bash
-# From project root
+PYTHON_API_URL=http://localhost:8000
+```
+
+## 4. Start Services
+
+You need both servers:
+- FastAPI backend on `:8000`
+- Next.js frontend on `:3000`
+
+### Option A: Start script
+
+```bash
+./start-dev.sh
+```
+
+Stop:
+
+```bash
+./stop-dev.sh
+```
+
+### Option B: Manual
+
+Terminal 1:
+
+```bash
+source venv/bin/activate
 python -m uvicorn api.server:app --reload --port 8000
 ```
 
-Expected output:
-```
-INFO:     Uvicorn running on http://0.0.0.0:8000 (Press CTRL+C to quit)
-INFO:     Started reloader process
-INFO:     Started server process
-INFO:     Waiting for application startup.
-INFO:     Application startup complete.
-```
-
-### Terminal 2: Start Next.js Frontend
+Terminal 2:
 
 ```bash
 cd web
 npm run dev
 ```
 
-Expected output:
-```
-▲ Next.js 14.x.x
-- Local:        http://localhost:3000
-```
+## 5. Verify
 
-## Verification
-
-### 1. Test Backend Health
+Backend health:
 
 ```bash
 curl http://localhost:8000/health
 ```
 
-Expected response:
-```json
-{
-  "status": "ok",
-  "service": "AutoUGC Analyzer API",
-  "version": "1.0.0"
-}
-```
-
-### 2. Test Frontend
-
-Open your browser to http://localhost:3000
-
-You should see the AutoUGC interface with 4 steps.
-
-### 3. Test Full Flow
-
-1. Paste a TikTok URL in Step 1
-2. Click "Analyze TikTok"
-3. Watch the progress bar (takes 2-5 minutes)
-4. Blueprint data should populate automatically
-5. Continue to Step 2 to upload product images
-6. Generate video in Step 4
-
-## How It Works
-
-### Step 1: TikTok Analysis (New!)
-
-**Old behavior:** Used mock/hardcoded data
-**New behavior:** Real video analysis
-
-1. User pastes TikTok URL
-2. Frontend calls `/api/analyze-video` (Next.js proxy)
-3. Next.js forwards to FastAPI at `http://localhost:8000/api/v1/analyze`
-4. FastAPI downloads video using yt-dlp
-5. FastAPI runs BlueprintGenerator with progress callbacks
-6. Frontend polls `/api/analyze-video/{job_id}` every 3 seconds
-7. Progress updates show in UI
-8. When complete, blueprint data populates the UI
-
-### Steps 2-4: Product & Video Generation (Unchanged)
-
-These steps work exactly as before:
-- Step 2: Upload product images
-- Step 3: Claude analyzes images and generates smart prompt
-- Step 4: Fal.ai generates video (Sora 2 or Kling)
-
-## Troubleshooting
-
-### "Failed to connect to analysis service"
-
-- Make sure FastAPI is running on port 8000
-- Check `web/.env.local` has `FASTAPI_URL=http://localhost:8000`
-
-### "Analysis failed: Failed to download video"
-
-- Check TikTok URL is valid and accessible
-- yt-dlp may need updating: `pip install -U yt-dlp`
-
-### Video analysis is slow
-
-- Normal: 2-5 minutes per video
-- Depends on video length and scene complexity
-- Whisper transcription is the slowest step
-
-### Port already in use
+Pipeline health:
 
 ```bash
-# Kill process on port 8000
-lsof -ti:8000 | xargs kill -9
+curl http://localhost:8000/api/v1/pipeline/health
+```
 
-# Kill process on port 3000
+Frontend health proxy:
+
+```bash
+curl http://localhost:3000/api/pipeline
+```
+
+## 6. Run A Full Job (UI)
+
+1. Open `http://localhost:3000`
+2. Enter a TikTok/Reel URL
+3. Upload at least one product image
+4. Select model (`sora` or `kling`)
+5. Click `Generate`
+6. Wait for pipeline completion and inspect node outputs
+
+## 7. Current API Surface
+
+Backend:
+- `POST /api/v1/pipeline/start`
+- `GET /api/v1/pipeline/jobs/{job_id}`
+- `DELETE /api/v1/pipeline/jobs/{job_id}`
+- `GET /api/v1/pipeline/health`
+
+Next.js proxy:
+- `POST /api/pipeline` with:
+  - `{ "action": "start", ... }`
+  - `{ "action": "status", "jobId": "..." }`
+- `GET /api/pipeline`
+
+## 8. Troubleshooting
+
+### Backend not reachable from frontend
+
+- Check backend is running on `:8000`
+- Check `web/.env.local` has `PYTHON_API_URL=http://localhost:8000`
+
+### Download fails at `download_video`
+
+- Validate TikTok/Reel URL
+- Update downloader:
+
+```bash
+source venv/bin/activate
+pip install -U yt-dlp
+```
+
+### Frame extraction fails
+
+- Verify `ffmpeg` and `ffprobe`:
+
+```bash
+ffmpeg -version
+ffprobe -version
+```
+
+### Analysis/prompt generation fails
+
+- Ensure `OPENROUTER_API_KEY` is present in root `.env`
+- Check OpenRouter credits/limits
+
+### Scene/video generation fails
+
+- Ensure `FAL_KEY` is present in root `.env`
+- Check Fal credits/queue status
+
+### Port conflicts
+
+```bash
+lsof -ti:8000 | xargs kill -9
 lsof -ti:3000 | xargs kill -9
 ```
 
-## API Endpoints
+## 9. Operational Notes
 
-### FastAPI Backend (Port 8000)
-
-- `GET /health` - Health check
-- `POST /api/v1/analyze` - Start video analysis job
-- `GET /api/v1/jobs/{job_id}` - Get job status and result
-- `DELETE /api/v1/jobs/{job_id}` - Delete completed job
-
-### Next.js Proxy (Port 3000)
-
-- `POST /api/analyze-video` - Proxy to FastAPI analyze endpoint
-- `GET /api/analyze-video/[jobId]` - Proxy to FastAPI job status
-- `POST /api/analyze` - Claude product image analysis (unchanged)
-- `POST /api/generate` - Fal.ai video generation (unchanged)
-
-## Development Notes
-
-### Progress Callbacks
-
-The BlueprintGenerator now supports progress callbacks:
-
-```python
-def progress_callback(step_name: str, step_num: int, total: int):
-    print(f"[{step_num}/{total}] {step_name}")
-
-blueprint = generator.generate(
-    video_path="video.mp4",
-    progress_callback=progress_callback
-)
-```
-
-### Job Manager
-
-Jobs are stored in-memory and auto-cleaned when deleted. For production, consider:
-- Redis for job storage
-- Celery for task queue
-- Database for job persistence
-
-### Video Cleanup
-
-Downloaded TikTok videos are automatically deleted after analysis. Temp files are cleaned up unless `keep_temp_files=True`.
-
-## Production Considerations
-
-For production deployment:
-
-1. **Use a task queue** (Celery, RQ, or similar)
-2. **Add authentication** to protect API endpoints
-3. **Rate limiting** to prevent abuse
-4. **File storage** (S3, etc.) instead of temp directories
-5. **Database** for job persistence
-6. **Webhooks** instead of polling for job status
-7. **HTTPS** for both servers
-8. **CORS** configuration for production domains
+- Job storage is in-memory only (lost on server restart).
+- Product images are currently required by pipeline state validation.
+- Polling is used for progress (no webhooks).

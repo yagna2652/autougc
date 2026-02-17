@@ -17,9 +17,8 @@ from functools import wraps
 from typing import Any, Callable, Literal
 
 from langgraph.graph import END, START, StateGraph
-from langchain_core.runnables import RunnableConfig
 
-from src.pipeline.state import PipelineState, _serialize_for_langsmith
+from src.pipeline.state import PipelineState
 
 logger = logging.getLogger(__name__)
 

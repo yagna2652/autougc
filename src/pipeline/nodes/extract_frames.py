@@ -2,7 +2,7 @@
 Extract Frames Node - Extracts key frames from video for visual analysis.
 
 Simple node that extracts representative frames from a video file
-for subsequent analysis with Claude Vision.
+for subsequent analysis with vision model (OpenRouter).
 """
 
 import logging
@@ -56,7 +56,7 @@ def extract_frames_node(state: dict[str, Any]) -> dict[str, Any]:
 
         logger.info(f"    ↳ Extracted {len(frames)} frames successfully")
         for i, frame in enumerate(frames):
-            logger.info(f"      Frame {i+1}: {Path(frame).name}")
+            logger.info(f"      Frame {i + 1}: {Path(frame).name}")
 
         return {
             "frames": frames,

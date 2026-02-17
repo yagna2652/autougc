@@ -15,7 +15,7 @@ logger = logging.getLogger(__name__)
 # =============================================================================
 
 # Model defaults
-DEFAULT_CLAUDE_MODEL = "claude-sonnet-4-20250514"
+DEFAULT_VISION_MODEL = "openai/gpt-4o-mini"
 DEFAULT_VIDEO_MODEL: Literal["sora", "kling"] = "sora"
 
 # Frame extraction defaults
@@ -41,17 +41,9 @@ DEFAULT_CONNECT_TIMEOUT = 30.0
 # =============================================================================
 
 
-def get_claude_model(state: dict[str, Any]) -> str:
-    """
-    Get the Claude model to use from state config.
-
-    Args:
-        state: Pipeline state dictionary
-
-    Returns:
-        Model name string
-    """
-    return state.get("config", {}).get("claude_model", DEFAULT_CLAUDE_MODEL)
+def get_config_vision_model(state: dict[str, Any]) -> str:
+    """Get the vision model from state config."""
+    return state.get("config", {}).get("vision_model", DEFAULT_VISION_MODEL)
 
 
 def get_video_model(state: dict[str, Any]) -> Literal["sora", "kling"]:
@@ -66,7 +58,9 @@ def get_video_model(state: dict[str, Any]) -> Literal["sora", "kling"]:
     """
     model = state.get("config", {}).get("video_model", DEFAULT_VIDEO_MODEL)
     if model not in ("sora", "kling"):
-        logger.warning(f"Unknown video model '{model}', defaulting to '{DEFAULT_VIDEO_MODEL}'")
+        logger.warning(
+            f"Unknown video model '{model}', defaulting to '{DEFAULT_VIDEO_MODEL}'"
+        )
         return DEFAULT_VIDEO_MODEL
     return model
 
@@ -176,11 +170,6 @@ def validate_config(state: dict[str, Any]) -> list[str]:
     """
     warnings = []
     config = state.get("config", {})
-
-    # Check Claude model
-    model = config.get("claude_model", DEFAULT_CLAUDE_MODEL)
-    if not model.startswith("claude-"):
-        warnings.append(f"Unusual Claude model name: {model}")
 
     # Check video model
     video_model = config.get("video_model", DEFAULT_VIDEO_MODEL)
