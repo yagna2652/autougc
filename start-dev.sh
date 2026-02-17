@@ -17,7 +17,7 @@ fi
 # Start FastAPI backend
 echo "🔵 Starting FastAPI backend on http://localhost:8000..."
 source venv/bin/activate
-python -m uvicorn api.server:app --reload --port 8000 > fastapi.log 2>&1 &
+python -m uvicorn api.server:app --port 8000 > fastapi.log 2>&1 &
 BACKEND_PID=$!
 echo "   Backend PID: $BACKEND_PID"
 
