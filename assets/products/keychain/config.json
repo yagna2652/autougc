@@ -2,30 +2,30 @@
   "name": "Mechanical Keyboard Keychain",
   "description": "Compact mechanical keyboard keychain fidget clicker with satisfying tactile Cherry MX blue-style switches. Small enough to fit in your pocket, perfect for stress relief and fidgeting. Translucent smoky housing with LED-lit switches visible inside.",
   "category": "mechanical_keyboard_keychain",
-  "mechanics": "4 keys in a single vertical column (1x4 layout), approximately 7cm long and 1.5cm wide. Translucent smoky housing with blue Cherry MX-style clicky switches visible inside; each key has ~2mm of travel with a sharp tactile snap (not a smooth linear glide). Metal chain with lobster clasp attached at the bottom when held vertically. The device is operated ONE-HANDED: the left hand holds and presses simultaneously. The index, middle, ring, and pinky fingers curl around the back and right side of the casing to form a firm static cradle against the middle phalanges. The thumb is the SOLE actuator — it hovers over the front face and presses one key at a time, moving up and down the vertical column. The thumb tip visibly whitens slightly from the switch resistance on each press. The grip fingers never move or adjust; only the thumb is active. The device is always held VERTICALLY with keys stacked in a column and the chain dangling at the bottom. The click sound is the hero moment — every press should feel intentional and land cleanly on a keycap.",
-  "grip": "One-Handed Remote Grip: the left hand cradles the device vertically, with index through pinky fingers curled around the back forming a static backboard. The thumb rests on the front face as the sole operator. Grip is firm but relaxed — secure enough that the device does not slide when the thumb applies pressure to the stiff switches. The chain hangs freely at the bottom.",
+  "mechanics": "4 keys in a single vertical column. This is a playful fidget toy, not a utility tool; interactions are casual, bouncy, and aimless. The device is operated ONE-HANDED using a loose squeezing motion. The smooth back of the casing rests against the palm. The four fingers (index, middle, ring, pinky) wrap around the front. The fleshy pads of the fingers press directly onto the FLAT TOP FACES of the keycaps (never the sides). When pressed, the keycap visibly plunges ~2mm downward into the translucent housing, fully depressing before instantly springing back up when released.",
+  "grip": "Wrapped Fidget Grip: The hand forms a loose, relaxed fist around the device. The palm acts as a static backboard. The four fingers curl over the front to act as the actuators, resting directly on the top keycaps. The grip is vertical with the chain dangling. The thumb stays wrapped around the back or side and DOES NOT press the keys.",
   "interaction_patterns": [
     {
-      "name": "The Linear Sweep",
-      "description": "Thumb presses keys sequentially from top to bottom (Key 1 → 2 → 3 → 4). Each press is distinct with full travel. Steady rhythm at ~120 BPM.",
+      "name": "The Fidget Wave",
+      "description": "The four fingers sequentially press the keycaps from top to bottom (index, middle, ring, pinky) in a rapid, fluid wave, like drumming fingers idly on a desk. The keys visibly travel up and down like a piston in a continuous, looping rhythm.",
       "frequency": "most common"
     },
     {
-      "name": "The Fidget Burst",
-      "description": "Rapid-fire pressing of a single key or oscillating between two adjacent keys (3-4 clicks per second). Thumb barely lifts off the keycap between presses. Erratic rhythm.",
+      "name": "The Anxious Crunch",
+      "description": "A rapid-fire, bouncy squeeze where multiple fingers quickly crunch the keycaps inward at the same time. The motion is fast, erratic, and purely for tactile pleasure. The keys sink deep into the housing and spring back rapidly.",
       "frequency": "common"
     },
     {
-      "name": "The LED Hold",
-      "description": "Deliberate, slower press where the thumb holds a key down for ~0.5 seconds to fully illuminate the LED before releasing. Emphasizes the light-up response.",
+      "name": "The Absentminded Hold",
+      "description": "A casual squeeze where a couple of fingers hold the keys fully depressed into the housing while the hand rests idly. The movement feels relaxed, as if the person is focusing on something else.",
       "frequency": "occasional"
     }
   ],
-  "timing": "Burst and Pause: a sequence of 3-4 clicks over ~1.5 seconds (120-140 BPM), followed by a 1-second pause to admire the LED glow or reset the thumb position. The rhythm is tactile and auditory, driven by the clicky switch sound.",
+  "timing": "Burst and Pause: a sequence of 3-4 clicks over ~1.5 seconds (120-140 BPM), followed by a 1-second pause to admire the LED glow or reset finger position. The rhythm is tactile and auditory, driven by the clicky switch sound.",
   "stationary_elements": [
-    "The four supporting fingers (index, middle, ring, pinky) remain locked in a curled position throughout",
-    "The clear plastic housing stays pinned against the fingers and does not slide up or down",
-    "The wrist of the holding hand maintains a fixed position, only rotating very slightly to catch light",
+    "The palm and back of the hand remain a stable backboard behind the device",
+    "The clear plastic housing stays cradled against the palm and does not slide",
+    "The wrist stays mostly fixed, only rotating very slightly to catch light",
     "Camera distance remains constant — framing does not zoom in or out"
   ],
   "camera_setups": [
@@ -40,16 +40,16 @@
   ],
   "impossible_interactions": [
     "two-handed interaction (holding with one hand, pressing with the other hand's finger)",
-    "using the index finger to press keys (thumb is the sole actuator)",
     "holding the device horizontally in landscape orientation",
-    "piano-style multi-finger pressing of multiple keys simultaneously",
     "pressing the device while it lies flat on a table or surface",
     "holding the device by the metal keychain ring while pressing keys",
     "inverted holding with the keychain ring pointing upward",
     "pressing the side or back of the plastic housing",
-    "thumb pressing two keys simultaneously (fat-fingering both fully down)",
     "throwing or flipping the device in the air",
-    "pressing outside the keycaps or between switches",
-    "large wrist swings that cause the product to rotate dramatically"
+    "large wrist swings that cause the product to rotate dramatically",
+    "fingers pressing the sides, edges, or bottom of the keycaps",
+    "keys remaining completely stiff or frozen when pressed by a finger",
+    "deliberate, slow, calculator-style typing or password-entering motions",
+    "using the thumb to press the keys"
   ]
 }

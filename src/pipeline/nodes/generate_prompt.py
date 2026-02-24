@@ -85,7 +85,6 @@ def generate_prompt_node(state: dict[str, Any]) -> dict[str, Any]:
         logger.info(f"    ↳ Calling OpenRouter ({model}) to generate prompt...")
         response = client.chat.completions.create(
             model=model,
-            max_tokens=2000,
             messages=[{"role": "user", "content": content}],
         )
         logger.info("    ↳ OpenRouter response received, parsing...")
@@ -212,12 +211,11 @@ rules. If the rules say "only one finger presses at a time", do not show two fin
 pressing simultaneously. If the rules say "4 keys in a row", do not show 6 keys.
 
 ## PHYSICS CONSTRAINTS (MANDATORY IN video_prompt)
-- State product scale relative to hand and stable grip.
-- Specify exactly which finger(s) move in each beat.
-- Specify what stays still: product body, grip hand, wrist, and palm.
-- Include explicit click/press count and rhythm per beat (e.g., 4 clicks, 0.3s cadence).
-- Use at least 3 explicit "DO NOT" constraints grounded in mechanics.
-- Never show physically impossible gestures listed in mechanics.
+- Describe the hand wrapped around the device (which fingers move, which parts stay still).
+- Describe the keys physically moving: plunging downward, sinking into the housing, springing back up.
+- Use the exact verbs and energy from the MECHANICS RULES — do not substitute with generic words.
+- Include at least 3 "DO NOT" constraints taken directly from the mechanics.
+- Never describe the motion as typing, entering data, or using a utility device.
 
 {library_text}
 
@@ -238,10 +236,10 @@ KEEP from TikTok:
 - Authenticity/UGC feel
 
 FOCUS ON MOTION (the product image is already visible):
-- Hand movements: pull, click, flip, rotate, squeeze, tap
-- Timing and rhythm of actions
+- Energy and dynamics: this is a fidget toy — force the motion to be playful, bouncy, repetitive, or absentminded (e.g., "idly drumming," "satisfying bouncy squeeze")
+- Point of contact: explicitly state where fingers press (the FLAT TOP SURFACE of the keycaps)
+- Key physics: you MUST describe the keys physically moving — use "plunges downward," "sinks into the housing," "springs back up"
 - Camera motion per beat (push in, pull back, slight pan)
-- Energy and dynamics (quick/snappy vs smooth/slow)
 - DO NOT describe the product's appearance (colors, materials, shape)
 
 CRITICAL REQUIREMENTS:
@@ -250,19 +248,19 @@ CRITICAL REQUIREMENTS:
 3. Reference specific clip IDs you chose from the library
 4. Focus on hand movements, camera motion, energy
 5. The product is already visible — don't describe its appearance
-6. Motion verbs: pull, click, flip, rotate, press, slide, reveal
+6. Motion verbs: squeeze, plunge, crunch, bounce, drum, spring, sink, press
 7. iPhone front-facing camera look, NOT cinematic
 8. Real skin with texture, natural imperfections — NOT airbrushed
 9. Slight handheld shake, natural micro-movements — NOT robotic
 10. Natural indoor lighting — NOT studio lighting
 11. Looking at phone screen (like filming themselves)
-12. For each beat, name the active finger(s) and which hand stabilizes the product
+12. Open the prompt by stating the device is held VERTICALLY with the chain dangling at the bottom
 13. Explicitly state what remains stationary in each beat
 14. Add a clear "DO NOT SHOW" section inside the video prompt
 
 Respond in JSON format:
 {{
-    "video_prompt": "A motion-focused prompt. Start with scene setup, then beat-by-beat motion with exact finger choreography, click counts, cadence, what remains still, and a DO NOT SHOW section. Do not describe product appearance.",
+    "video_prompt": "A visual, cinematic scene description — NOT a technical manual. Open with orientation (VERTICALLY held, chain dangling). Then describe each beat as a vivid motion scene: what the fingers do, how the keys plunge and spring, the energy and rhythm. End with a DO NOT SHOW section. Use the same verbs as the mechanics rules.",
     "negative_prompt": "A semicolon-separated list of explicit forbidden motions from mechanics and physics constraints.",
     "script": "A short casual script (1-3 sentences) adapted for the new product — written how a real person talks on TikTok",
     "scene_description": "A photorealistic image generation prompt for the FIRST FRAME of the video. Describe: the person (age, appearance, clothing from TikTok analysis), the setting/background, the lighting, the product being held or interacted with (name it explicitly), camera angle and framing, UGC/iPhone selfie aesthetic. This will be fed to an image generation model to create the starting frame, so be vivid and specific. Example: 'A young woman in her early 20s with long brown hair wearing a casual oversized hoodie, sitting at a desk in a cozy bedroom with warm natural window lighting, holding a small mechanical keyboard keychain in her right hand, close-up shot from slightly above, iPhone selfie camera style, authentic and unpolished feel'"
@@ -343,12 +341,11 @@ rules. If the rules say "only one finger presses at a time", do not show two fin
 pressing simultaneously. If the rules say "4 keys in a row", do not show 6 keys.
 
 ## PHYSICS CONSTRAINTS (MANDATORY IN video_prompt)
-- State product scale relative to hand and stable grip.
-- Specify exactly which finger(s) move in each beat.
-- Specify what stays still: product body, grip hand, wrist, and palm.
-- Include explicit click/press count and rhythm per beat (e.g., 4 clicks, 0.3s cadence).
-- Use at least 3 explicit "DO NOT" constraints grounded in mechanics.
-- Never show physically impossible gestures listed in mechanics.
+- Describe the hand wrapped around the device (which fingers move, which parts stay still).
+- Describe the keys physically moving: plunging downward, sinking into the housing, springing back up.
+- Use the exact verbs and energy from the MECHANICS RULES — do not substitute with generic words.
+- Include at least 3 "DO NOT" constraints taken directly from the mechanics.
+- Never describe the motion as typing, entering data, or using a utility device.
 
 {library_text}
 
@@ -369,10 +366,10 @@ KEEP from TikTok:
 - Authenticity/UGC feel
 
 FOCUS ON MOTION (the product image is already visible):
-- Hand movements: pull, click, flip, rotate, squeeze, tap
-- Timing and rhythm of actions
+- Energy and dynamics: this is a fidget toy — force the motion to be playful, bouncy, repetitive, or absentminded (e.g., "idly drumming," "satisfying bouncy squeeze")
+- Point of contact: explicitly state where fingers press (the FLAT TOP SURFACE of the keycaps)
+- Key physics: you MUST describe the keys physically moving — use "plunges downward," "sinks into the housing," "springs back up"
 - Camera motion per beat (push in, pull back, slight pan)
-- Energy and dynamics (quick/snappy vs smooth/slow)
 - DO NOT describe the product's appearance (colors, materials, shape)
 
 CRITICAL REQUIREMENTS:
@@ -381,19 +378,19 @@ CRITICAL REQUIREMENTS:
 3. Reference specific clip IDs you chose from the library
 4. Focus on hand movements, camera motion, energy
 5. The product is already visible — don't describe its appearance
-6. Motion verbs: pull, click, flip, rotate, press, slide, reveal
+6. Motion verbs: squeeze, plunge, crunch, bounce, drum, spring, sink, press
 7. iPhone front-facing camera look, NOT cinematic
 8. Real skin with texture, natural imperfections — NOT airbrushed
 9. Slight handheld shake, natural micro-movements — NOT robotic
 10. Natural indoor lighting — NOT studio lighting
 11. Looking at phone screen (like filming themselves)
-12. For each beat, name the active finger(s) and which hand stabilizes the product
+12. Open the prompt by stating the device is held VERTICALLY with the chain dangling at the bottom
 13. Explicitly state what remains stationary in each beat
 14. Add a clear "DO NOT SHOW" section inside the video prompt
 
 Respond in JSON format:
 {{
-    "video_prompt": "A motion-focused prompt. Start with scene setup, then beat-by-beat motion with exact finger choreography, click counts, cadence, what remains still, and a DO NOT SHOW section. Do not describe product appearance.",
+    "video_prompt": "A visual, cinematic scene description — NOT a technical manual. Open with orientation (VERTICALLY held, chain dangling). Then describe each beat as a vivid motion scene: what the fingers do, how the keys plunge and spring, the energy and rhythm. End with a DO NOT SHOW section. Use the same verbs as the mechanics rules.",
     "negative_prompt": "A semicolon-separated list of explicit forbidden motions from mechanics and physics constraints.",
     "script": "A short casual script (1-3 sentences) adapted for the new product — written how a real person talks on TikTok",
     "scene_description": "A photorealistic image generation prompt for the FIRST FRAME of the video. Describe: the person (age, appearance, clothing from TikTok analysis), the setting/background, the lighting, the product being held or interacted with (name it explicitly), camera angle and framing, UGC/iPhone selfie aesthetic. This will be fed to an image generation model to create the starting frame, so be vivid and specific. Example: 'A young woman in her early 20s with long brown hair wearing a casual oversized hoodie, sitting at a desk in a cozy bedroom with warm natural window lighting, holding a small mechanical keyboard keychain in her right hand, close-up shot from slightly above, iPhone selfie camera style, authentic and unpolished feel'"
