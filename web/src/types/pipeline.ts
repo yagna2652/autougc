@@ -108,3 +108,26 @@ export interface StatusPipelineResponse extends PipelineResult {}
 export interface ErrorResponse {
   error: string;
 }
+
+// =============================================================================
+// Run History Types
+// =============================================================================
+
+export interface SerializedNodeState {
+  status: "idle" | "running" | "done" | "failed";
+  output: Record<string, unknown> | null;
+}
+
+export interface RunHistoryEntry {
+  id: string;
+  jobId: string | null;
+  videoUrl: string;
+  videoModel: "sora" | "kling" | "kling-v3";
+  status: "running" | "completed" | "failed";
+  startedAt: number;
+  updatedAt: number;
+  error: string | null;
+  nodeStates: Record<string, SerializedNodeState>;
+  sceneImageUrl: string | null;
+  generatedVideoUrl: string | null;
+}

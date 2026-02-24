@@ -1,12 +1,61 @@
 "use client";
 
-import { usePipeline } from "@/hooks/use-pipeline";
+import { useCallback, useRef } from "react";
+import { usePipeline, type PipelineCallbacks, type NodeState } from "@/hooks/use-pipeline";
+import { useRunHistory } from "@/hooks/use-run-history";
 import { PipelineCanvas } from "./pipeline-canvas";
 import { DetailPanel } from "./detail-panel";
+import { RunHistoryPanel } from "./run-history";
 
 export function PipelineApp() {
-  const pipeline = usePipeline();
+  const history = useRunHistory();
+  const historyRef = useRef(history);
+  historyRef.current = history;
+
+  const callbacks: PipelineCallbacks = {
+    onRunStart: ({ videoUrl, videoModel }) => {
+      return historyRef.current.createRun({ videoUrl, videoModel });
+    },
+    onJobIdAssigned: (runId, jobId) => {
+      historyRef.current.updateRun(runId, { jobId });
+    },
+    onNodeUpdate: (runId, nodeStates: Record<string, NodeState>) => {
+      // Extract scene image + video URLs from node outputs for quick access
+      const sceneImageUrl =
+        (nodeStates.generate_scene_image?.output?.image_url as string) ?? null;
+      const generatedVideoUrl =
+        (nodeStates.generate_video?.output?.video_url as string) ?? null;
+
+      historyRef.current.updateRun(runId, {
+        nodeStates,
+        sceneImageUrl,
+        generatedVideoUrl,
+      });
+    },
+    onRunComplete: (runId, status, error) => {
+      historyRef.current.updateRun(runId, { status, error });
+    },
+  };
+
+  const pipeline = usePipeline(callbacks);
   const isPanelOpen = pipeline.selectedNode !== null;
+
+  const handleSelectRun = useCallback(
+    (id: string) => {
+      const entry = historyRef.current.getRun(id);
+      if (!entry) return;
+
+      // Only restore terminal runs (completed/failed)
+      if (entry.status !== "running") {
+        pipeline.restoreRun(entry);
+      }
+    },
+    [pipeline]
+  );
+
+  const handleNewRun = useCallback(() => {
+    pipeline.resetPipeline();
+  }, [pipeline]);
 
   return (
     <div
@@ -20,7 +69,17 @@ export function PipelineApp() {
           '-apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif',
       }}
     >
-      {/* Canvas area — shrinks when panel is open */}
+      {/* Left history panel */}
+      <RunHistoryPanel
+        runs={history.runs}
+        activeRunId={pipeline.activeRunId}
+        onSelectRun={handleSelectRun}
+        onDeleteRun={history.deleteRun}
+        onClearAll={history.clearAll}
+        onNewRun={handleNewRun}
+      />
+
+      {/* Canvas area — shrinks when detail panel is open */}
       <div
         style={{
           flex: 1,
