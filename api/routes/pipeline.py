@@ -179,6 +179,9 @@ class StartPipelineRequest(BaseModel):
         default="",
         description="Physical interaction rules/mechanics (auto-loaded if empty)",
     )
+    fal_key: Optional[str] = Field(
+        default=None, description="Fal.ai API key (overrides FAL_KEY env var)"
+    )
     config: Optional[PipelineConfigModel] = Field(
         default=None, description="Pipeline configuration"
     )
@@ -463,6 +466,10 @@ async def start_pipeline(
 
         # Store job
         job_store.create(job_id, initial_state)
+
+        # Apply runtime API key overrides
+        if request.fal_key:
+            os.environ["FAL_KEY"] = request.fal_key
 
         # Start background task
         background_tasks.add_task(run_pipeline_async, job_id, initial_state)

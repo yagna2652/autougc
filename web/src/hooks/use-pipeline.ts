@@ -28,9 +28,29 @@ export function usePipeline() {
   const [videoUrl, setVideoUrl] = useState("");
   const [videoModel, setVideoModel] = useState<"sora" | "kling" | "kling-v3">("sora");
   const [productImages, setProductImages] = useState<string[]>([]);
+  const [identityPack, setIdentityPack] = useState<Record<string, string>>({});
+  const [useIdentityPack, setUseIdentityPack] = useState(false);
+  const [useTailImage, setUseTailImage] = useState(false);
+  const [falKey, setFalKey] = useState<string>(() => {
+    if (typeof window !== "undefined") {
+      return localStorage.getItem("fal_key") ?? "";
+    }
+    return "";
+  });
   const [error, setError] = useState<string | null>(null);
 
   const eventSourceRef = useRef<EventSource | null>(null);
+
+  const persistFalKey = useCallback((key: string) => {
+    setFalKey(key);
+    if (typeof window !== "undefined") {
+      if (key.trim()) {
+        localStorage.setItem("fal_key", key);
+      } else {
+        localStorage.removeItem("fal_key");
+      }
+    }
+  }, []);
 
   const startPipeline = useCallback(async () => {
     if (!videoUrl.trim()) return;
@@ -55,6 +75,10 @@ export function usePipeline() {
           videoUrl: videoUrl.trim(),
           videoModel,
           productImages,
+          productIdentityPack: Object.keys(identityPack).length > 0 ? identityPack : undefined,
+          useIdentityPack,
+          useTailImage,
+          falKey: falKey.trim() || undefined,
         }),
       });
 
@@ -117,7 +141,7 @@ export function usePipeline() {
       setError(err instanceof Error ? err.message : "Unknown error");
       setPipelineStatus("failed");
     }
-  }, [videoUrl, videoModel, productImages, pipelineStatus]);
+  }, [videoUrl, videoModel, productImages, identityPack, useIdentityPack, useTailImage, pipelineStatus, falKey]);
 
   const resetPipeline = useCallback(() => {
     if (eventSourceRef.current) {
@@ -131,6 +155,10 @@ export function usePipeline() {
     setError(null);
     setVideoUrl("");
     setProductImages([]);
+    setIdentityPack({});
+    setUseIdentityPack(false);
+    setUseTailImage(false);
+    // intentionally keep falKey — user shouldn't have to re-paste it
   }, []);
 
   const handleImageUpload = useCallback((files: FileList | null) => {
@@ -149,6 +177,28 @@ export function usePipeline() {
     setProductImages((prev) => prev.filter((_, i) => i !== index));
   }, []);
 
+  const handleIdentityImageUpload = useCallback((angle: string, file: File) => {
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const base64 = e.target?.result as string;
+      if (base64) setIdentityPack((prev) => ({ ...prev, [angle]: base64 }));
+    };
+    reader.readAsDataURL(file);
+  }, []);
+
+  const removeIdentityImage = useCallback((angle: string) => {
+    setIdentityPack((prev) => {
+      const next = { ...prev };
+      delete next[angle];
+      return next;
+    });
+  }, []);
+
+  const toggleIdentityPack = useCallback((enabled: boolean) => {
+    setUseIdentityPack(enabled);
+    if (enabled) setVideoModel("kling-v3");
+  }, []);
+
   return {
     nodeStates,
     pipelineStatus,
@@ -162,6 +212,15 @@ export function usePipeline() {
     productImages,
     handleImageUpload,
     removeImage,
+    identityPack,
+    handleIdentityImageUpload,
+    removeIdentityImage,
+    useIdentityPack,
+    toggleIdentityPack,
+    useTailImage,
+    setUseTailImage,
+    falKey,
+    setFalKey: persistFalKey,
     error,
     startPipeline,
     resetPipeline,

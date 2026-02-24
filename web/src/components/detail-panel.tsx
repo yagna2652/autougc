@@ -17,6 +17,15 @@ interface DetailPanelProps {
   productImages: string[];
   handleImageUpload: (files: FileList | null) => void;
   removeImage: (index: number) => void;
+  identityPack: Record<string, string>;
+  handleIdentityImageUpload: (angle: string, file: File) => void;
+  removeIdentityImage: (angle: string) => void;
+  useIdentityPack: boolean;
+  toggleIdentityPack: (enabled: boolean) => void;
+  useTailImage: boolean;
+  setUseTailImage: (v: boolean) => void;
+  falKey: string;
+  setFalKey: (key: string) => void;
   pipelineStatus: PipelineStatus;
   startPipeline: () => void;
   resetPipeline: () => void;
@@ -459,6 +468,15 @@ export function DetailPanel({
   productImages,
   handleImageUpload,
   removeImage,
+  identityPack,
+  handleIdentityImageUpload,
+  removeIdentityImage,
+  useIdentityPack,
+  toggleIdentityPack,
+  useTailImage,
+  setUseTailImage,
+  falKey,
+  setFalKey,
   pipelineStatus,
   startPipeline,
   resetPipeline,
@@ -564,6 +582,15 @@ export function DetailPanel({
             productImages={productImages}
             handleImageUpload={handleImageUpload}
             removeImage={removeImage}
+            identityPack={identityPack}
+            handleIdentityImageUpload={handleIdentityImageUpload}
+            removeIdentityImage={removeIdentityImage}
+            useIdentityPack={useIdentityPack}
+            toggleIdentityPack={toggleIdentityPack}
+            useTailImage={useTailImage}
+            setUseTailImage={setUseTailImage}
+            falKey={falKey}
+            setFalKey={setFalKey}
             pipelineStatus={pipelineStatus}
             startPipeline={startPipeline}
             resetPipeline={resetPipeline}

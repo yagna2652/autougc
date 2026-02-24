@@ -60,6 +60,7 @@ async function handleStart(body: StartPipelineRequest): Promise<NextResponse> {
     product_mechanics: body.productMechanics || "",
     product_images: body.productImages || [],
     product_identity_pack: body.productIdentityPack,
+    fal_key: (body as StartPipelineRequest & { falKey?: string }).falKey || undefined,
     config: {
       video_model: body.videoModel || "sora",
       use_identity_pack: body.useIdentityPack ?? false,

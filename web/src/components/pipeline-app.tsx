@@ -49,6 +49,15 @@ export function PipelineApp() {
         productImages={pipeline.productImages}
         handleImageUpload={pipeline.handleImageUpload}
         removeImage={pipeline.removeImage}
+        identityPack={pipeline.identityPack}
+        handleIdentityImageUpload={pipeline.handleIdentityImageUpload}
+        removeIdentityImage={pipeline.removeIdentityImage}
+        useIdentityPack={pipeline.useIdentityPack}
+        toggleIdentityPack={pipeline.toggleIdentityPack}
+        useTailImage={pipeline.useTailImage}
+        setUseTailImage={pipeline.setUseTailImage}
+        falKey={pipeline.falKey}
+        setFalKey={pipeline.setFalKey}
         pipelineStatus={pipeline.pipelineStatus}
         startPipeline={pipeline.startPipeline}
         resetPipeline={pipeline.resetPipeline}
