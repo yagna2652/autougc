@@ -1,7 +1,8 @@
 "use client";
 
 import { useState, useRef, useCallback } from "react";
-import { NODE_DEFINITIONS } from "@/lib/nodes";
+import { NODE_DEFINITIONS, NODE_IDS } from "@/lib/nodes";
+import type { RunHistoryEntry } from "@/types/pipeline";
 
 export type NodeStatus = "idle" | "running" | "done" | "failed";
 
@@ -18,7 +19,14 @@ function makeInitialNodeStates(): Record<string, NodeState> {
   );
 }
 
-export function usePipeline() {
+export interface PipelineCallbacks {
+  onRunStart?: (info: { videoUrl: string; videoModel: "sora" | "kling" | "kling-v3" }) => string | void;
+  onJobIdAssigned?: (runId: string, jobId: string) => void;
+  onNodeUpdate?: (runId: string, nodeStates: Record<string, NodeState>) => void;
+  onRunComplete?: (runId: string, status: "completed" | "failed", error: string | null) => void;
+}
+
+export function usePipeline(callbacks?: PipelineCallbacks) {
   const [nodeStates, setNodeStates] = useState<Record<string, NodeState>>(
     makeInitialNodeStates
   );
@@ -40,6 +48,9 @@ export function usePipeline() {
   const [error, setError] = useState<string | null>(null);
 
   const eventSourceRef = useRef<EventSource | null>(null);
+  const activeRunIdRef = useRef<string | null>(null);
+  const callbacksRef = useRef(callbacks);
+  callbacksRef.current = callbacks;
 
   const persistFalKey = useCallback((key: string) => {
     setFalKey(key);
@@ -66,6 +77,10 @@ export function usePipeline() {
     setPipelineStatus("running");
     setNodeStates(makeInitialNodeStates());
 
+    // Fire onRunStart callback
+    const runId = callbacksRef.current?.onRunStart?.({ videoUrl, videoModel }) ?? null;
+    activeRunIdRef.current = runId ?? null;
+
     try {
       const response = await fetch("/api/pipeline", {
         method: "POST",
@@ -89,6 +104,11 @@ export function usePipeline() {
 
       const newJobId: string = data.jobId;
       setJobId(newJobId);
+
+      // Fire onJobIdAssigned callback
+      if (activeRunIdRef.current) {
+        callbacksRef.current?.onJobIdAssigned?.(activeRunIdRef.current, newJobId);
+      }
 
       // Open SSE connection via the Next.js proxy
       const es = new EventSource(`/api/pipeline?jobId=${newJobId}`);
@@ -114,15 +134,30 @@ export function usePipeline() {
         } else if (eventType === "node_done") {
           const node = event.node as string;
           const output = (event.output as Record<string, unknown>) ?? null;
-          setNodeStates((prev) => ({
-            ...prev,
-            [node]: { status: "done", output },
-          }));
+          setNodeStates((prev) => {
+            const next = {
+              ...prev,
+              [node]: { status: "done" as const, output },
+            };
+            // Fire onNodeUpdate callback with latest state
+            if (activeRunIdRef.current) {
+              callbacksRef.current?.onNodeUpdate?.(activeRunIdRef.current, next);
+            }
+            return next;
+          });
           setSelectedNode(node);
         } else if (eventType === "done") {
           const status = event.status as string;
-          setPipelineStatus(status === "completed" ? "completed" : "failed");
-          if (event.error) setError(event.error as string);
+          const finalStatus = status === "completed" ? "completed" : "failed";
+          setPipelineStatus(finalStatus);
+          const finalError = event.error ? (event.error as string) : null;
+          if (finalError) setError(finalError);
+
+          // Fire onRunComplete callback
+          if (activeRunIdRef.current) {
+            callbacksRef.current?.onRunComplete?.(activeRunIdRef.current, finalStatus as "completed" | "failed", finalError);
+          }
+
           es.close();
           eventSourceRef.current = null;
         }
@@ -134,12 +169,24 @@ export function usePipeline() {
         if (es.readyState === EventSource.CLOSED) return;
         setError("SSE connection lost");
         setPipelineStatus("failed");
+
+        // Fire onRunComplete on SSE error
+        if (activeRunIdRef.current) {
+          callbacksRef.current?.onRunComplete?.(activeRunIdRef.current, "failed", "SSE connection lost");
+        }
+
         es.close();
         eventSourceRef.current = null;
       };
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Unknown error");
+      const errMsg = err instanceof Error ? err.message : "Unknown error";
+      setError(errMsg);
       setPipelineStatus("failed");
+
+      // Fire onRunComplete on fetch error
+      if (activeRunIdRef.current) {
+        callbacksRef.current?.onRunComplete?.(activeRunIdRef.current, "failed", errMsg);
+      }
     }
   }, [videoUrl, videoModel, productImages, identityPack, useIdentityPack, useTailImage, pipelineStatus, falKey]);
 
@@ -199,6 +246,33 @@ export function usePipeline() {
     if (enabled) setVideoModel("kling-v3");
   }, []);
 
+  const restoreRun = useCallback((entry: RunHistoryEntry) => {
+    // Close any active SSE connection
+    if (eventSourceRef.current) {
+      eventSourceRef.current.close();
+      eventSourceRef.current = null;
+    }
+
+    // Restore all state from the saved entry
+    setNodeStates(
+      Object.keys(entry.nodeStates).length > 0
+        ? (entry.nodeStates as Record<string, NodeState>)
+        : makeInitialNodeStates()
+    );
+    setPipelineStatus(entry.status === "running" ? "idle" : entry.status);
+    setJobId(entry.jobId);
+    setVideoUrl(entry.videoUrl);
+    setVideoModel(entry.videoModel);
+    setError(entry.error);
+    activeRunIdRef.current = null;
+
+    // Auto-select the last completed node
+    const lastDone = [...NODE_IDS].reverse().find(
+      (nid) => entry.nodeStates[nid]?.status === "done"
+    );
+    setSelectedNode(lastDone ?? "input");
+  }, []);
+
   return {
     nodeStates,
     pipelineStatus,
@@ -224,5 +298,7 @@ export function usePipeline() {
     error,
     startPipeline,
     resetPipeline,
+    restoreRun,
+    activeRunId: activeRunIdRef.current,
   };
 }
