@@ -79,10 +79,12 @@ async def root():
     }
 
 
-# Import and include pipeline router
+# Import and include routers
 from api.routes.pipeline import router as pipeline_router
+from api.routes.prompts import router as prompts_router
 
 app.include_router(pipeline_router, prefix="/api/v1", tags=["pipeline"])
+app.include_router(prompts_router, prefix="/api/v1", tags=["prompts"])
 
 
 if __name__ == "__main__":

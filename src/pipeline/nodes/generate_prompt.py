@@ -9,8 +9,10 @@ full interaction library, then outputs a motion prompt and script.
 All LLM calls are traced via LangSmith for full observability.
 """
 
+import json
 import logging
 import re
+import time
 from typing import Any
 
 from openai import OpenAI
@@ -23,11 +25,96 @@ from src.pipeline.utils import (
     process_image,
     resolve_clip_ids_to_plain_language,
 )
+from src.prompt_store import get_prompt_store
 
 logger = logging.getLogger(__name__)
 
 # Default output fields for error handling
 _ERROR_DEFAULTS = {"video_prompt": ""}
+
+# ---------------------------------------------------------------------------
+# Template skeleton — same as the f-string in _build_prompt_request_openrouter
+# but with fixed placeholders instead of runtime values. Only changes when the
+# instructions are edited, so the hash is stable across runs.
+# ---------------------------------------------------------------------------
+_TEMPLATE_SKELETON = """You are an expert at creating MOTION prompts for AI image-to-video models.
+
+IMPORTANT: The video model will start with the actual product image as the first frame.
+Your prompt should describe HOW THINGS MOVE, not what the product looks like.
+
+## TIKTOK STYLE ANALYSIS
+I analyzed a TikTok video. Replicate this style:
+
+{{ANALYSIS}}
+
+## PRODUCT INFO
+**Product**: {{PRODUCT_DESCRIPTION}}
+
+## MECHANICS RULES
+{{PRODUCT_MECHANICS}}
+
+These rules describe the physical reality of the product — how it's held, what moves,
+what stays still, how big it is relative to hands. Your motion prompt MUST obey these
+rules. If the rules say "only one finger presses at a time", do not show two fingers
+pressing simultaneously. If the rules say "4 keys in a row", do not show 6 keys.
+
+## PHYSICS CONSTRAINTS (MANDATORY IN video_prompt)
+- Describe the hand wrapped around the device (which fingers move, which parts stay still).
+- Describe the keys physically moving: plunging downward, sinking into the housing, springing back up.
+- Use the exact verbs and energy from the MECHANICS RULES — do not substitute with generic words.
+- Include at least 3 "DO NOT" constraints taken directly from the mechanics.
+- Never describe the motion as typing, entering data, or using a utility device.
+
+{{LIBRARY}}
+
+## YOUR TASK
+Using the TikTok style, mechanics rules, and interaction library above:
+
+1. **Pick 1-3 clips** from the library that fit the TikTok's energy and style
+2. **Plan the beats** — a short choreographed sequence (total ≤ 12 seconds)
+3. **Write a motion prompt** describing how the scene animates from the product image
+4. **Write a casual script** (1-3 sentences) adapted for this product
+
+KEEP from TikTok:
+- Person appearance/vibe (age, clothing, energy)
+- Setting/background
+- Lighting style
+- Camera movement (handheld, angle)
+- Pacing and energy level
+- Authenticity/UGC feel
+
+FOCUS ON MOTION (the product image is already visible):
+- Energy and dynamics: this is a fidget toy — force the motion to be playful, bouncy, repetitive, or absentminded (e.g., "idly drumming," "satisfying bouncy squeeze")
+- Point of contact: explicitly state where fingers press (the FLAT TOP SURFACE of the keycaps)
+- Key physics: you MUST describe the keys physically moving — use "plunges downward," "sinks into the housing," "springs back up"
+- Camera motion per beat (push in, pull back, slight pan)
+- DO NOT describe the product's appearance (colors, materials, shape)
+
+CRITICAL REQUIREMENTS:
+1. Starting frame shows the product — describe how it MOVES from there
+2. Follow the MECHANICS RULES exactly — do not invent impossible movements
+3. Reference specific clip IDs you chose from the library
+4. Focus on hand movements, camera motion, energy
+5. The product is already visible — don't describe its appearance
+6. Motion verbs: squeeze, plunge, crunch, bounce, drum, spring, sink, press
+7. iPhone front-facing camera look, NOT cinematic
+8. Real skin with texture, natural imperfections — NOT airbrushed
+9. Slight handheld shake, natural micro-movements — NOT robotic
+10. Natural indoor lighting — NOT studio lighting
+11. Looking at phone screen (like filming themselves)
+12. Open the prompt by stating the device is held VERTICALLY with the chain dangling at the bottom
+13. Explicitly state what remains stationary in each beat
+14. Add a clear "DO NOT SHOW" section inside the video prompt
+
+Respond in JSON format:
+{{
+    "video_prompt": "...",
+    "negative_prompt": "...",
+    "script": "...",
+    "scene_description": "..."
+}}
+
+Return ONLY valid JSON."""
 
 
 def generate_prompt_node(state: dict[str, Any]) -> dict[str, Any]:
@@ -83,10 +170,12 @@ def generate_prompt_node(state: dict[str, Any]) -> dict[str, Any]:
 
         # Call OpenRouter
         logger.info(f"    ↳ Calling OpenRouter ({model}) to generate prompt...")
+        t0 = time.time()
         response = client.chat.completions.create(
             model=model,
             messages=[{"role": "user", "content": content}],
         )
+        elapsed = time.time() - t0
         logger.info("    ↳ OpenRouter response received, parsing...")
 
         # Check for errors
@@ -144,10 +233,55 @@ def generate_prompt_node(state: dict[str, Any]) -> dict[str, Any]:
             logger.info(f"    ↳ Scene description: {len(scene_description)} chars")
             logger.info(f"    ↳ Scene preview: {scene_description[:100]}...")
 
+        # --- Trace storage ---
+        trace_id = None
+        template_version = None
+        try:
+            # Build assembled_prompt from text parts of content array
+            assembled_prompt = "\n".join(
+                part["text"] for part in content if part.get("type") == "text"
+            )
+            # Extract token usage from response
+            token_usage = None
+            if hasattr(response, "usage") and response.usage:
+                token_usage = {
+                    "input_tokens": getattr(response.usage, "prompt_tokens", 0) or 0,
+                    "output_tokens": getattr(response.usage, "completion_tokens", 0) or 0,
+                }
+            store = get_prompt_store()
+            trace_id = store.save_trace(
+                template_text=_TEMPLATE_SKELETON,
+                assembled_prompt=assembled_prompt,
+                model=model,
+                inputs_snapshot={
+                    "video_analysis": video_analysis,
+                    "product_description": product_description,
+                    "product_mechanics": product_mechanics,
+                },
+                job_id=state.get("job_id"),
+                raw_response=response_text,
+                processed_output={
+                    "video_prompt": video_prompt,
+                    "suggested_script": suggested_script,
+                    "scene_description": scene_description,
+                },
+                token_usage=token_usage,
+                latency_ms=int(elapsed * 1000),
+            )
+            # Fetch template version for SSE passthrough
+            trace_data = store.get_trace(trace_id)
+            if trace_data:
+                template_version = trace_data.get("template_version")
+            logger.info(f"    ↳ Trace saved: {trace_id[:8]}... (template v{template_version})")
+        except Exception as trace_err:
+            logger.warning(f"    ↳ Trace storage failed (non-fatal): {trace_err}")
+
         return {
             "video_prompt": video_prompt,
             "suggested_script": suggested_script,
             "scene_description": scene_description,
+            "trace_id": trace_id,
+            "template_version": template_version,
             "current_step": "prompt_generated",
         }
 

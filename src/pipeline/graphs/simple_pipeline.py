@@ -6,8 +6,9 @@ A clean, minimal pipeline:
 2. Extract frames
 3. Analyze with vision model (OpenRouter)
 4. Generate video prompt
-5. Generate scene image (composite product into TikTok-style scene)
-6. Generate video
+5. Validate video prompt quality
+6. Generate scene image (composite product into TikTok-style scene)
+7. Generate video
 
 All steps are traced via LangSmith for observability.
 """
@@ -30,6 +31,7 @@ from src.pipeline.nodes.extract_frames import extract_frames_node
 from src.pipeline.nodes.generate_prompt import generate_prompt_node
 from src.pipeline.nodes.generate_scene_image import generate_scene_image_node
 from src.pipeline.nodes.generate_video import generate_video_node
+from src.pipeline.nodes.validate_prompt import validate_prompt_node
 
 
 # Human-readable descriptions for logging
@@ -38,6 +40,7 @@ NODE_DESCRIPTIONS = {
     "extract_frames": "Extracting key frames from video",
     "analyze_video": "Analyzing video style with vision model",
     "generate_prompt": "Generating video prompt",
+    "validate_prompt": "Validating video prompt quality",
     "generate_scene_image": "Generating scene image (Nano Banana Pro)",
     "generate_video": "Generating video (this takes 2-5 minutes)",
 }
@@ -73,7 +76,7 @@ def build_pipeline() -> StateGraph:
     Build the simple UGC generation pipeline.
 
     Flow:
-        START → download → extract_frames → analyze_video → generate_prompt → generate_scene_image → generate_video → END
+        START → download → extract_frames → analyze_video → generate_prompt → validate_prompt → generate_scene_image → generate_video → END
 
     Returns:
         Compiled StateGraph ready for execution
@@ -93,6 +96,9 @@ def build_pipeline() -> StateGraph:
     )
     workflow.add_node(
         "generate_prompt", with_logging("generate_prompt", generate_prompt_node)
+    )
+    workflow.add_node(
+        "validate_prompt", with_logging("validate_prompt", validate_prompt_node)
     )
     workflow.add_node(
         "generate_scene_image",
@@ -134,6 +140,15 @@ def build_pipeline() -> StateGraph:
 
     workflow.add_conditional_edges(
         "generate_prompt",
+        should_continue,
+        {
+            "continue": "validate_prompt",
+            "end": END,
+        },
+    )
+
+    workflow.add_conditional_edges(
+        "validate_prompt",
         should_continue,
         {
             "continue": "generate_scene_image",

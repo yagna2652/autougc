@@ -108,7 +108,7 @@ job_store = JobStore()
 class ProductIdentityPack(BaseModel):
     """Multi-angle product reference images for identity fidelity."""
 
-    front: str = Field(default="", description="Front view image (base64 or URL)")
+    front: str = Field(default="", description="Front view image (file path or URL)")
     side_45: str = Field(default="", description="45-degree angle view")
     back: str = Field(default="", description="Back view")
     top: str = Field(default="", description="Top view")
@@ -165,7 +165,7 @@ class StartPipelineRequest(BaseModel):
     )
     product_images: list[str] = Field(
         default_factory=list,
-        description="Product images as base64 or URLs (auto-loaded if empty)",
+        description="Product images as file paths, URLs, or base64 data URLs (auto-loaded if empty)",
     )
     product_identity_pack: Optional[ProductIdentityPack] = Field(
         default=None,
@@ -205,6 +205,7 @@ class JobStatusResponse(BaseModel):
     video_analysis: Optional[dict[str, Any]] = None
     video_prompt: str = ""
     suggested_script: str = ""
+    prompt_validation: Optional[dict[str, Any]] = None
     scene_image_url: str = ""  # Fal CDN URL of generated scene image
     i2v_image_url: str = ""  # Fal CDN URL used for I2V
     generated_video_url: str = ""
@@ -223,6 +224,7 @@ STEP_DESCRIPTIONS = {
     "extract_frames": "Extracting key frames from video...",
     "analyze_video": "Analyzing video style with vision model...",
     "generate_prompt": "Generating video prompt...",
+    "validate_prompt": "Validating video prompt quality...",
     "generate_scene_image": "Generating scene image with Nano Banana Pro...",
     "generate_video": "Generating video with AI (this may take 2-5 minutes)...",
 }
@@ -233,6 +235,7 @@ NODE_ORDER = [
     "extract_frames",
     "analyze_video",
     "generate_prompt",
+    "validate_prompt",
     "generate_scene_image",
     "generate_video",
 ]
@@ -251,6 +254,13 @@ def _get_filtered_output(node_name: str, state_update: dict) -> dict:
             "video_prompt": state_update.get("video_prompt"),
             "suggested_script": state_update.get("suggested_script"),
             "scene_description": state_update.get("scene_description"),
+            "trace_id": state_update.get("trace_id"),
+            "template_version": state_update.get("template_version"),
+        }
+    elif node_name == "validate_prompt":
+        return {
+            "prompt_validation": state_update.get("prompt_validation"),
+            "video_prompt": state_update.get("video_prompt"),
         }
     elif node_name == "generate_scene_image":
         return {"scene_image_url": state_update.get("scene_image_url")}
@@ -558,6 +568,7 @@ async def get_job_status(
         video_analysis=state.get("video_analysis"),
         video_prompt=state.get("video_prompt", ""),
         suggested_script=state.get("suggested_script", ""),
+        prompt_validation=state.get("prompt_validation"),
         scene_image_url=state.get("scene_image_url", ""),
         i2v_image_url=state.get("i2v_image_url", ""),
         generated_video_url=state.get("generated_video_url", ""),

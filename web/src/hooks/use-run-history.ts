@@ -36,12 +36,19 @@ function generateId(): string {
 }
 
 export function useRunHistory() {
-  const [runs, setRuns] = useState<RunHistoryEntry[]>(loadRuns);
+  const [runs, setRuns] = useState<RunHistoryEntry[]>([]);
+  const [isHydrated, setIsHydrated] = useState(false);
 
-  // Sync to localStorage on every change
+  // Load from localStorage after hydration so server/client initial render match
   useEffect(() => {
-    saveRuns(runs);
-  }, [runs]);
+    setRuns(loadRuns());
+    setIsHydrated(true);
+  }, []);
+
+  // Sync to localStorage only after hydration (avoids wiping storage on first mount)
+  useEffect(() => {
+    if (isHydrated) saveRuns(runs);
+  }, [runs, isHydrated]);
 
   const createRun = useCallback(
     ({ videoUrl, videoModel }: { videoUrl: string; videoModel: "sora" | "kling" | "kling-v3" }): string => {
@@ -58,6 +65,7 @@ export function useRunHistory() {
         nodeStates: {},
         sceneImageUrl: null,
         generatedVideoUrl: null,
+        templateVersion: null,
       };
       setRuns((prev) => [entry, ...prev].slice(0, MAX_RUNS));
       return id;

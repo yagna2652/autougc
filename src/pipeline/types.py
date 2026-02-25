@@ -61,7 +61,7 @@ class VideoAnalysisData(TypedDict, total=False):
 class ProductReference(TypedDict, total=False):
     """Product identity pack - multi-angle reference images for SKU."""
 
-    front: str  # Front view image (base64 or URL)
+    front: str  # Front view image (file path or URL)
     side_45: str  # 45-degree angle view
     back: str  # Back view
     top: str  # Top view

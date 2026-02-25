@@ -130,4 +130,5 @@ export interface RunHistoryEntry {
   nodeStates: Record<string, SerializedNodeState>;
   sceneImageUrl: string | null;
   generatedVideoUrl: string | null;
+  templateVersion: number | null;
 }

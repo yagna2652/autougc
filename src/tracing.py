@@ -417,16 +417,10 @@ def _serialize_args(obj: Any, max_string_length: int = 10_000) -> Any:
     if isinstance(obj, (list, tuple)):
         return [_serialize_args(item, max_string_length) for item in obj]
     if isinstance(obj, dict):
-        # Filter out known large image fields
-        filtered = {}
-        for k, v in obj.items():
-            key = str(k)
-            # Skip large image data fields
-            if key in ("image_data", "base64_image", "image_bytes", "frames_data"):
-                filtered[key] = f"<image data excluded: ~{len(str(v))} bytes>"
-            else:
-                filtered[key] = _serialize_args(v, max_string_length)
-        return filtered
+        return {
+            str(k): _serialize_args(v, max_string_length)
+            for k, v in obj.items()
+        }
     if hasattr(obj, "__dict__"):
         return {
             "__class__": obj.__class__.__name__,
