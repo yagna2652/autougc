@@ -4,16 +4,21 @@ Pipeline API routes - Simple UGC generation pipeline.
 Endpoints:
 - POST /pipeline/start - Start a pipeline job
 - GET /pipeline/jobs/{job_id} - Get job status
+- GET /pipeline/stream/{job_id} - SSE stream of pipeline events
 - GET /pipeline/health - Health check
 """
 
+import asyncio
+import json
 import logging
 import os
+import time
 import uuid
 from datetime import datetime
 from typing import Any, Optional
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Header
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
 logger = logging.getLogger(__name__)
@@ -55,6 +60,7 @@ class JobStore:
 
     def __init__(self):
         self.jobs: dict[str, dict[str, Any]] = {}
+        self.event_logs: dict[str, list] = {}
 
     def create(self, job_id: str, initial_state: dict[str, Any]) -> None:
         self.jobs[job_id] = {
@@ -62,6 +68,7 @@ class JobStore:
             "created_at": datetime.utcnow().isoformat(),
             "updated_at": datetime.utcnow().isoformat(),
         }
+        self.event_logs[job_id] = []
 
     def get(self, job_id: str) -> Optional[dict[str, Any]]:
         return self.jobs.get(job_id)
@@ -80,6 +87,13 @@ class JobStore:
     def get_state(self, job_id: str) -> Optional[dict[str, Any]]:
         job = self.jobs.get(job_id)
         return job["state"] if job else None
+
+    def push_event(self, job_id: str, event: dict) -> None:
+        if job_id in self.event_logs:
+            self.event_logs[job_id].append(event)
+
+    def get_events(self, job_id: str) -> list:
+        return self.event_logs.get(job_id, [])
 
 
 # Global job store
@@ -165,6 +179,9 @@ class StartPipelineRequest(BaseModel):
         default="",
         description="Physical interaction rules/mechanics (auto-loaded if empty)",
     )
+    fal_key: Optional[str] = Field(
+        default=None, description="Fal.ai API key (overrides FAL_KEY env var)"
+    )
     config: Optional[PipelineConfigModel] = Field(
         default=None, description="Pipeline configuration"
     )
@@ -210,10 +227,44 @@ STEP_DESCRIPTIONS = {
     "generate_video": "Generating video with AI (this may take 2-5 minutes)...",
 }
 
+# Ordered list of pipeline nodes
+NODE_ORDER = [
+    "download_video",
+    "extract_frames",
+    "analyze_video",
+    "generate_prompt",
+    "generate_scene_image",
+    "generate_video",
+]
+
+
+def _get_filtered_output(node_name: str, state_update: dict) -> dict:
+    """Return a filtered output dict for each node (no base64 images)."""
+    if node_name == "download_video":
+        return {"video_path": state_update.get("video_path")}
+    elif node_name == "extract_frames":
+        return {"frame_count": len(state_update.get("frames", []))}
+    elif node_name == "analyze_video":
+        return {"video_analysis": state_update.get("video_analysis")}
+    elif node_name == "generate_prompt":
+        return {
+            "video_prompt": state_update.get("video_prompt"),
+            "suggested_script": state_update.get("suggested_script"),
+            "scene_description": state_update.get("scene_description"),
+        }
+    elif node_name == "generate_scene_image":
+        return {"scene_image_url": state_update.get("scene_image_url")}
+    elif node_name == "generate_video":
+        return {
+            "generated_video_url": state_update.get("generated_video_url"),
+            "i2v_image_url": state_update.get("i2v_image_url"),
+        }
+    return {}
+
 
 async def run_pipeline_async(job_id: str, initial_state: dict[str, Any]) -> None:
     """
-    Run the pipeline in the background.
+    Run the pipeline in the background, pushing SSE events as nodes complete.
 
     Args:
         job_id: Job identifier
@@ -229,85 +280,121 @@ async def run_pipeline_async(job_id: str, initial_state: dict[str, Any]) -> None
         # Update status to running
         job_store.update(job_id, {"status": "running"})
 
-        step_count = 0
-        total_steps = len(STEP_DESCRIPTIONS)
+        # Push node_start for the first node
+        job_store.push_event(
+            job_id,
+            {"type": "node_start", "node": NODE_ORDER[0], "ts": time.time()},
+        )
 
-        # Stream through the pipeline
-        for node_name, state_update in stream_pipeline(initial_state):
-            step_count += 1
-            step_desc = STEP_DESCRIPTIONS.get(node_name, node_name)
+        def sync_runner() -> None:
+            """Run the blocking pipeline generator in a thread."""
+            step_count = 0
+            total_steps = len(NODE_ORDER)
 
-            # Log completion with step number
-            logger.info(f"")
-            logger.info(f"[{step_count}/{total_steps}] ✓ {node_name} COMPLETED")
+            for node_name, state_update in stream_pipeline(initial_state):
+                step_count += 1
+                step_desc = STEP_DESCRIPTIONS.get(node_name, node_name)
 
-            # Log any interesting details from the state update
-            if node_name == "download_video" and state_update.get("video_path"):
-                logger.info(f"    → Video saved to: {state_update['video_path']}")
+                logger.info(f"")
+                logger.info(f"[{step_count}/{total_steps}] ✓ {node_name} COMPLETED")
 
-            if node_name == "extract_frames" and state_update.get("frames"):
-                logger.info(f"    → Extracted {len(state_update['frames'])} frames")
+                # Log details
+                if node_name == "download_video" and state_update.get("video_path"):
+                    logger.info(f"    → Video saved to: {state_update['video_path']}")
 
-            if node_name == "analyze_video" and state_update.get("video_analysis"):
-                analysis = state_update["video_analysis"]
-                style = analysis.get("style", "unknown")
-                energy = analysis.get("energy", "unknown")
-                logger.info(f"    → Style: {style}, Energy: {energy}")
-
-            if node_name == "generate_prompt" and state_update.get("video_prompt"):
-                prompt = state_update["video_prompt"]
-                logger.info(f"    → Prompt length: {len(prompt)} chars")
-                # Show first 100 chars of prompt
-                logger.info(f"    → Preview: {prompt[:100]}...")
-                if state_update.get("scene_description"):
+                if node_name == "extract_frames" and state_update.get("frames"):
                     logger.info(
-                        f"    → Scene description: {state_update['scene_description'][:100]}..."
+                        f"    → Extracted {len(state_update['frames'])} frames"
                     )
 
-            if node_name == "generate_scene_image" and state_update.get(
-                "scene_image_url"
-            ):
-                logger.info(f"    → Scene image URL: {state_update['scene_image_url']}")
+                if node_name == "analyze_video" and state_update.get("video_analysis"):
+                    analysis = state_update["video_analysis"]
+                    style = analysis.get("style", "unknown")
+                    energy = analysis.get("energy", "unknown")
+                    logger.info(f"    → Style: {style}, Energy: {energy}")
 
-            if node_name == "generate_video" and state_update.get(
-                "generated_video_url"
-            ):
-                logger.info(f"    → Video URL: {state_update['generated_video_url']}")
+                if node_name == "generate_prompt" and state_update.get("video_prompt"):
+                    prompt = state_update["video_prompt"]
+                    logger.info(f"    → Prompt length: {len(prompt)} chars")
+                    logger.info(f"    → Preview: {prompt[:100]}...")
 
-            # Update job store with each state update
-            job_store.update(job_id, state_update)
+                if node_name == "generate_scene_image" and state_update.get(
+                    "scene_image_url"
+                ):
+                    logger.info(
+                        f"    → Scene image URL: {state_update['scene_image_url']}"
+                    )
 
-            # Check for errors
-            if state_update.get("error"):
-                logger.error(f"")
-                logger.error(f"{'=' * 60}")
-                logger.error(f"PIPELINE FAILED at {node_name}")
-                logger.error(f"Error: {state_update.get('error')}")
-                logger.error(f"{'=' * 60}")
-                job_store.update(job_id, {"status": "failed"})
-                return
+                if node_name == "generate_video" and state_update.get(
+                    "generated_video_url"
+                ):
+                    logger.info(
+                        f"    → Video URL: {state_update['generated_video_url']}"
+                    )
 
-            # Log what's coming next
-            if step_count < total_steps:
-                next_steps = list(STEP_DESCRIPTIONS.keys())
-                if step_count < len(next_steps):
-                    next_step = next_steps[step_count]
-                    next_desc = STEP_DESCRIPTIONS.get(next_step, next_step)
-                    logger.info(f"")
-                    logger.info(f"[{step_count + 1}/{total_steps}] → {next_desc}")
+                # Build filtered output (strips base64 images)
+                filtered_output = _get_filtered_output(node_name, state_update)
 
-        # Mark as completed
-        job_store.update(
-            job_id,
-            {
-                "status": "completed",
-                "current_step": "done",
-            },
-        )
-        logger.info(f"")
-        logger.info(f"{'=' * 60}")
-        logger.info(f"PIPELINE COMPLETED | Job: {job_id[:8]}...")
-        logger.info(f"{'=' * 60}")
+                # Push node_done event
+                job_store.push_event(
+                    job_id,
+                    {
+                        "type": "node_done",
+                        "node": node_name,
+                        "output": filtered_output,
+                        "ts": time.time(),
+                    },
+                )
+
+                # Update job store with full state
+                job_store.update(job_id, state_update)
+
+                # Check for errors
+                if state_update.get("error"):
+                    logger.error(f"")
+                    logger.error(f"{'=' * 60}")
+                    logger.error(f"PIPELINE FAILED at {node_name}")
+                    logger.error(f"Error: {state_update.get('error')}")
+                    logger.error(f"{'=' * 60}")
+                    job_store.update(job_id, {"status": "failed"})
+                    job_store.push_event(
+                        job_id,
+                        {
+                            "type": "done",
+                            "status": "failed",
+                            "error": state_update.get("error"),
+                            "ts": time.time(),
+                        },
+                    )
+                    return
+
+                # Push node_start for the next node
+                if step_count < total_steps:
+                    job_store.push_event(
+                        job_id,
+                        {
+                            "type": "node_start",
+                            "node": NODE_ORDER[step_count],
+                            "ts": time.time(),
+                        },
+                    )
+
+            # Mark as completed
+            job_store.update(
+                job_id,
+                {"status": "completed", "current_step": "done"},
+            )
+            job_store.push_event(
+                job_id,
+                {"type": "done", "status": "completed", "ts": time.time()},
+            )
+            logger.info(f"")
+            logger.info(f"{'=' * 60}")
+            logger.info(f"PIPELINE COMPLETED | Job: {job_id[:8]}...")
+            logger.info(f"{'=' * 60}")
+
+        # Run the blocking pipeline in a thread to keep the event loop free
+        await asyncio.to_thread(sync_runner)
 
     except Exception as e:
         logger.exception(f"Pipeline error for job {job_id}")
@@ -318,10 +405,11 @@ async def run_pipeline_async(job_id: str, initial_state: dict[str, Any]) -> None
         logger.error(f"{'=' * 60}")
         job_store.update(
             job_id,
-            {
-                "status": "failed",
-                "error": str(e),
-            },
+            {"status": "failed", "error": str(e)},
+        )
+        job_store.push_event(
+            job_id,
+            {"type": "done", "status": "failed", "error": str(e), "ts": time.time()},
         )
 
 
@@ -346,7 +434,8 @@ async def start_pipeline(
     4. Generates a video prompt
     5. Generates the video
 
-    The job runs in the background. Poll /pipeline/jobs/{job_id} for status.
+    The job runs in the background. Poll /pipeline/jobs/{job_id} for status,
+    or stream events via GET /pipeline/stream/{job_id}.
     """
     from src.pipeline import create_initial_state
 
@@ -359,7 +448,6 @@ async def start_pipeline(
             config = request.config.model_dump()
 
         # Create initial state
-        # If product info not provided, create_initial_state will auto-load default
         identity_pack = (
             request.product_identity_pack.model_dump()
             if request.product_identity_pack
@@ -370,7 +458,7 @@ async def start_pipeline(
             product_description=request.product_description,
             product_images=request.product_images,
             product_identity_pack=identity_pack,
-            product_category=request.product_category,  # None triggers auto-load
+            product_category=request.product_category,
             product_mechanics=request.product_mechanics,
             config=config,
             job_id=job_id,
@@ -379,13 +467,17 @@ async def start_pipeline(
         # Store job
         job_store.create(job_id, initial_state)
 
+        # Apply runtime API key overrides
+        if request.fal_key:
+            os.environ["FAL_KEY"] = request.fal_key
+
         # Start background task
         background_tasks.add_task(run_pipeline_async, job_id, initial_state)
 
         return PipelineResponse(
             job_id=job_id,
             status="started",
-            message="Pipeline started. Poll /pipeline/jobs/{job_id} for status.",
+            message="Pipeline started. Stream events via /pipeline/stream/{job_id}.",
         )
 
     except Exception as e:
@@ -393,6 +485,47 @@ async def start_pipeline(
         raise HTTPException(
             status_code=500, detail=f"Failed to start pipeline: {str(e)}"
         )
+
+
+@router.get("/pipeline/stream/{job_id}")
+async def stream_job_events(job_id: str):
+    """
+    Stream pipeline events via Server-Sent Events.
+
+    No auth required — job_id UUID is effectively the access token.
+    Events: node_start, node_done, done, ping
+    """
+    if not job_store.get(job_id):
+        raise HTTPException(status_code=404, detail=f"Job {job_id} not found")
+
+    async def generator():
+        cursor = 0
+        last_ping = time.time()
+
+        while True:
+            events = job_store.get_events(job_id)
+
+            # Drain any buffered events
+            while cursor < len(events):
+                event = events[cursor]
+                yield f"data: {json.dumps(event)}\n\n"
+                cursor += 1
+                # Stop after sending the terminal event
+                if event.get("type") == "done":
+                    return
+
+            # Keepalive ping every 15 seconds
+            if time.time() - last_ping > 15:
+                yield f"data: {json.dumps({'type': 'ping'})}\n\n"
+                last_ping = time.time()
+
+            await asyncio.sleep(0.2)
+
+    return StreamingResponse(
+        generator(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
 
 
 @router.get("/pipeline/jobs/{job_id}", response_model=JobStatusResponse)
@@ -451,8 +584,6 @@ async def pipeline_health():
 
     Returns status of dependencies and configuration.
     """
-    import os
-
     from src.tracing import is_tracing_enabled
 
     return {

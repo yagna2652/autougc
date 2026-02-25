@@ -19,7 +19,6 @@ const PYTHON_API_URL = process.env.PYTHON_API_URL || "http://localhost:8000";
 const API_KEY = process.env.API_KEY || "";
 const START_REQUEST_TIMEOUT_MS = 210000; // 210s (~3.5 min)
 
-// Increase timeout for API route (Next.js config)
 export const maxDuration = 300; // 5 minutes
 
 function getAuthHeaders(): Record<string, string> {
@@ -54,15 +53,14 @@ export async function POST(request: NextRequest) {
   }
 }
 
-async function handleStart(
-  body: StartPipelineRequest
-): Promise<NextResponse> {
+async function handleStart(body: StartPipelineRequest): Promise<NextResponse> {
   const requestBody = {
     video_url: body.videoUrl,
     product_description: body.productDescription || "",
     product_mechanics: body.productMechanics || "",
     product_images: body.productImages || [],
     product_identity_pack: body.productIdentityPack,
+    fal_key: (body as StartPipelineRequest & { falKey?: string }).falKey || undefined,
     config: {
       video_model: body.videoModel || "sora",
       use_identity_pack: body.useIdentityPack ?? false,
@@ -72,12 +70,8 @@ async function handleStart(
     },
   };
 
-  // Create abort controller for timeout
   const controller = new AbortController();
-  const timeoutId = setTimeout(
-    () => controller.abort(),
-    START_REQUEST_TIMEOUT_MS
-  );
+  const timeoutId = setTimeout(() => controller.abort(), START_REQUEST_TIMEOUT_MS);
 
   try {
     const response = await fetch(`${PYTHON_API_URL}/api/v1/pipeline/start`, {
@@ -88,14 +82,12 @@ async function handleStart(
     });
 
     clearTimeout(timeoutId);
-
     const data = await response.json();
 
     if (!response.ok) {
-      console.error("Pipeline start failed:", data);
       return NextResponse.json(
         { error: data.detail || "Failed to start pipeline" },
-        { status: response.status }
+        { status: response.status },
       );
     }
 
@@ -107,26 +99,21 @@ async function handleStart(
     });
   } catch (error: any) {
     clearTimeout(timeoutId);
-    if (error.name === 'AbortError') {
+    if (error.name === "AbortError") {
       return NextResponse.json(
         { error: "Request timeout - backend took too long to respond" },
-        { status: 504 }
+        { status: 504 },
       );
     }
     throw error;
   }
 }
 
-async function handleStatus(
-  body: StatusPipelineRequest
-): Promise<NextResponse> {
+async function handleStatus(body: StatusPipelineRequest): Promise<NextResponse> {
   try {
     const response = await fetch(
       `${PYTHON_API_URL}/api/v1/pipeline/jobs/${body.jobId}`,
-      {
-        method: "GET",
-        headers: getAuthHeaders(),
-      }
+      { method: "GET", headers: getAuthHeaders() },
     );
 
     const data = await response.json();
@@ -134,11 +121,10 @@ async function handleStatus(
     if (!response.ok) {
       return NextResponse.json(
         { error: data.detail || "Failed to get job status" },
-        { status: response.status }
+        { status: response.status },
       );
     }
 
-    // Map Python snake_case response to TypeScript camelCase with proper types
     const result: Partial<PipelineResult> & { success: boolean } = {
       success: true,
       jobId: data.job_id,
@@ -156,24 +142,51 @@ async function handleStatus(
   } catch {
     return NextResponse.json(
       { error: "Backend not reachable", status: "running", currentStep: "waiting" },
-      { status: 502 }
+      { status: 502 },
     );
   }
 }
 
-export async function GET(): Promise<NextResponse> {
-  try {
-    const response = await fetch(`${PYTHON_API_URL}/api/v1/pipeline/health`);
-    const data = await response.json();
+export async function GET(request: NextRequest): Promise<Response> {
+  const jobId = request.nextUrl.searchParams.get("jobId");
 
-    return NextResponse.json({
-      status: "ok",
-      backend: data,
+  // No jobId → health check
+  if (!jobId) {
+    try {
+      const response = await fetch(`${PYTHON_API_URL}/api/v1/pipeline/health`);
+      const data = await response.json();
+      return NextResponse.json({ status: "ok", backend: data });
+    } catch {
+      return NextResponse.json({ status: "error", error: "Backend not reachable" });
+    }
+  }
+
+  // jobId present → proxy SSE stream from backend
+  try {
+    const authHeaders: Record<string, string> = {};
+    if (API_KEY) authHeaders["X-API-Key"] = API_KEY;
+
+    const backendResponse = await fetch(
+      `${PYTHON_API_URL}/api/v1/pipeline/stream/${jobId}`,
+      { headers: authHeaders },
+    );
+
+    if (!backendResponse.ok) {
+      return NextResponse.json({ error: "Job not found" }, { status: 404 });
+    }
+
+    return new Response(backendResponse.body, {
+      headers: {
+        "Content-Type": "text/event-stream",
+        "Cache-Control": "no-cache, no-transform",
+        "X-Accel-Buffering": "no",
+        Connection: "keep-alive",
+      },
     });
   } catch {
-    return NextResponse.json({
-      status: "error",
-      error: "Backend not reachable",
-    });
+    return NextResponse.json(
+      { error: "Backend not reachable" },
+      { status: 502 },
+    );
   }
 }
