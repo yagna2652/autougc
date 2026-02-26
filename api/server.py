@@ -31,6 +31,10 @@ for logger_name in ["src.pipeline", "api", "uvicorn"]:
 logging.getLogger("httpx").setLevel(logging.WARNING)
 logging.getLogger("httpcore").setLevel(logging.WARNING)
 
+# Configure LangSmith to strip large base64 data from traces
+from src.tracing import configure_langsmith_filtering
+configure_langsmith_filtering()
+
 import uvicorn
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
