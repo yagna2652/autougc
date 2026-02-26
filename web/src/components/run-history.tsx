@@ -338,6 +338,23 @@ export function RunHistoryPanel({
                 >
                   {run.videoModel}
                 </span>
+                {run.templateVersion != null && (
+                  <>
+                    <span style={{ fontSize: 10, color: "#444" }}>·</span>
+                    <span
+                      style={{
+                        fontSize: 9,
+                        color: "#93c5fd",
+                        background: "rgba(59,130,246,0.1)",
+                        padding: "1px 5px",
+                        borderRadius: 3,
+                        fontWeight: 600,
+                      }}
+                    >
+                      v{run.templateVersion}
+                    </span>
+                  </>
+                )}
                 <span style={{ fontSize: 10, color: "#444" }}>·</span>
                 <span style={{ fontSize: 10, color: "#555" }}>
                   {formatRelativeTime(run.startedAt)}

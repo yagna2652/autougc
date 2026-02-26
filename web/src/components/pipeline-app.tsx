@@ -26,10 +26,15 @@ export function PipelineApp() {
       const generatedVideoUrl =
         (nodeStates.generate_video?.output?.video_url as string) ?? null;
 
+      // Extract template version from generate_prompt output
+      const templateVersion =
+        (nodeStates.generate_prompt?.output?.template_version as number) ?? null;
+
       historyRef.current.updateRun(runId, {
         nodeStates,
         sceneImageUrl,
         generatedVideoUrl,
+        templateVersion,
       });
     },
     onRunComplete: (runId, status, error) => {
@@ -119,6 +124,7 @@ export function PipelineApp() {
         setFalKey={pipeline.setFalKey}
         pipelineStatus={pipeline.pipelineStatus}
         startPipeline={pipeline.startPipeline}
+        resumePipeline={pipeline.resumePipeline}
         resetPipeline={pipeline.resetPipeline}
         error={pipeline.error}
       />

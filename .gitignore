@@ -25,6 +25,7 @@ wheels/
 *.egg
 
 # Virtual environments
+venv
 venv/
 ENV/
 env/
@@ -61,7 +62,11 @@ temp/
 
 # API keys (never commit these)
 secrets.json
+.claude/settings.local.json
 
 # Process ID files
 .backend.pid
 .frontend.pid
+
+# Local data (prompt traces DB)
+data/

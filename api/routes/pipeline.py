@@ -108,7 +108,7 @@ job_store = JobStore()
 class ProductIdentityPack(BaseModel):
     """Multi-angle product reference images for identity fidelity."""
 
-    front: str = Field(default="", description="Front view image (base64 or URL)")
+    front: str = Field(default="", description="Front view image (file path or URL)")
     side_45: str = Field(default="", description="45-degree angle view")
     back: str = Field(default="", description="Back view")
     top: str = Field(default="", description="Top view")
@@ -165,7 +165,7 @@ class StartPipelineRequest(BaseModel):
     )
     product_images: list[str] = Field(
         default_factory=list,
-        description="Product images as base64 or URLs (auto-loaded if empty)",
+        description="Product images as file paths, URLs, or base64 data URLs (auto-loaded if empty)",
     )
     product_identity_pack: Optional[ProductIdentityPack] = Field(
         default=None,
@@ -187,6 +187,14 @@ class StartPipelineRequest(BaseModel):
     )
 
 
+class ResumePipelineRequest(BaseModel):
+    """Request to resume a paused pipeline."""
+
+    video_prompt: Optional[str] = Field(
+        default=None, description="Edited video prompt (if user modified it)"
+    )
+
+
 class PipelineResponse(BaseModel):
     """Response for pipeline operations."""
 
@@ -205,6 +213,7 @@ class JobStatusResponse(BaseModel):
     video_analysis: Optional[dict[str, Any]] = None
     video_prompt: str = ""
     suggested_script: str = ""
+    prompt_validation: Optional[dict[str, Any]] = None
     scene_image_url: str = ""  # Fal CDN URL of generated scene image
     i2v_image_url: str = ""  # Fal CDN URL used for I2V
     generated_video_url: str = ""
@@ -223,6 +232,7 @@ STEP_DESCRIPTIONS = {
     "extract_frames": "Extracting key frames from video...",
     "analyze_video": "Analyzing video style with vision model...",
     "generate_prompt": "Generating video prompt...",
+    "validate_prompt": "Validating video prompt quality...",
     "generate_scene_image": "Generating scene image with Nano Banana Pro...",
     "generate_video": "Generating video with AI (this may take 2-5 minutes)...",
 }
@@ -233,6 +243,7 @@ NODE_ORDER = [
     "extract_frames",
     "analyze_video",
     "generate_prompt",
+    "validate_prompt",
     "generate_scene_image",
     "generate_video",
 ]
@@ -251,6 +262,13 @@ def _get_filtered_output(node_name: str, state_update: dict) -> dict:
             "video_prompt": state_update.get("video_prompt"),
             "suggested_script": state_update.get("suggested_script"),
             "scene_description": state_update.get("scene_description"),
+            "trace_id": state_update.get("trace_id"),
+            "template_version": state_update.get("template_version"),
+        }
+    elif node_name == "validate_prompt":
+        return {
+            "prompt_validation": state_update.get("prompt_validation"),
+            "video_prompt": state_update.get("video_prompt"),
         }
     elif node_name == "generate_scene_image":
         return {"scene_image_url": state_update.get("scene_image_url")}
@@ -262,9 +280,85 @@ def _get_filtered_output(node_name: str, state_update: dict) -> dict:
     return {}
 
 
+def _push_node_events(
+    job_id: str,
+    node_name: str,
+    state_update: dict,
+    step_count: int,
+    total_steps: int,
+) -> bool:
+    """
+    Push SSE events for a completed node. Returns True if an error was detected.
+    """
+    step_desc = STEP_DESCRIPTIONS.get(node_name, node_name)
+
+    logger.info(f"")
+    logger.info(f"[{step_count}/{total_steps}] ✓ {node_name} COMPLETED")
+
+    # Log details
+    if node_name == "download_video" and state_update.get("video_path"):
+        logger.info(f"    → Video saved to: {state_update['video_path']}")
+    if node_name == "extract_frames" and state_update.get("frames"):
+        logger.info(f"    → Extracted {len(state_update['frames'])} frames")
+    if node_name == "analyze_video" and state_update.get("video_analysis"):
+        analysis = state_update["video_analysis"]
+        style = analysis.get("style", "unknown")
+        energy = analysis.get("energy", "unknown")
+        logger.info(f"    → Style: {style}, Energy: {energy}")
+    if node_name == "generate_prompt" and state_update.get("video_prompt"):
+        prompt = state_update["video_prompt"]
+        logger.info(f"    → Prompt length: {len(prompt)} chars")
+        logger.info(f"    → Preview: {prompt[:100]}...")
+    if node_name == "generate_scene_image" and state_update.get("scene_image_url"):
+        logger.info(f"    → Scene image URL: {state_update['scene_image_url']}")
+    if node_name == "generate_video" and state_update.get("generated_video_url"):
+        logger.info(f"    → Video URL: {state_update['generated_video_url']}")
+
+    # Build filtered output (strips base64 images)
+    filtered_output = _get_filtered_output(node_name, state_update)
+
+    # Push node_done event
+    job_store.push_event(
+        job_id,
+        {
+            "type": "node_done",
+            "node": node_name,
+            "output": filtered_output,
+            "ts": time.time(),
+        },
+    )
+
+    # Update job store with full state
+    job_store.update(job_id, state_update)
+
+    # Check for errors
+    if state_update.get("error"):
+        logger.error(f"")
+        logger.error(f"{'=' * 60}")
+        logger.error(f"PIPELINE FAILED at {node_name}")
+        logger.error(f"Error: {state_update.get('error')}")
+        logger.error(f"{'=' * 60}")
+        job_store.update(job_id, {"status": "failed"})
+        job_store.push_event(
+            job_id,
+            {
+                "type": "done",
+                "status": "failed",
+                "error": state_update.get("error"),
+                "ts": time.time(),
+            },
+        )
+        return True
+
+    return False
+
+
 async def run_pipeline_async(job_id: str, initial_state: dict[str, Any]) -> None:
     """
-    Run the pipeline in the background, pushing SSE events as nodes complete.
+    Run the creative phase of the pipeline (through validate_prompt), then pause.
+
+    The SSE stream stays open after pausing — resume pushes more events to
+    the same event log and the still-connected client picks them up.
 
     Args:
         job_id: Job identifier
@@ -291,81 +385,104 @@ async def run_pipeline_async(job_id: str, initial_state: dict[str, Any]) -> None
             step_count = 0
             total_steps = len(NODE_ORDER)
 
-            for node_name, state_update in stream_pipeline(initial_state):
+            for node_name, state_update in stream_pipeline(
+                initial_state, stop_after="validate_prompt"
+            ):
                 step_count += 1
-                step_desc = STEP_DESCRIPTIONS.get(node_name, node_name)
 
-                logger.info(f"")
-                logger.info(f"[{step_count}/{total_steps}] ✓ {node_name} COMPLETED")
-
-                # Log details
-                if node_name == "download_video" and state_update.get("video_path"):
-                    logger.info(f"    → Video saved to: {state_update['video_path']}")
-
-                if node_name == "extract_frames" and state_update.get("frames"):
-                    logger.info(
-                        f"    → Extracted {len(state_update['frames'])} frames"
-                    )
-
-                if node_name == "analyze_video" and state_update.get("video_analysis"):
-                    analysis = state_update["video_analysis"]
-                    style = analysis.get("style", "unknown")
-                    energy = analysis.get("energy", "unknown")
-                    logger.info(f"    → Style: {style}, Energy: {energy}")
-
-                if node_name == "generate_prompt" and state_update.get("video_prompt"):
-                    prompt = state_update["video_prompt"]
-                    logger.info(f"    → Prompt length: {len(prompt)} chars")
-                    logger.info(f"    → Preview: {prompt[:100]}...")
-
-                if node_name == "generate_scene_image" and state_update.get(
-                    "scene_image_url"
-                ):
-                    logger.info(
-                        f"    → Scene image URL: {state_update['scene_image_url']}"
-                    )
-
-                if node_name == "generate_video" and state_update.get(
-                    "generated_video_url"
-                ):
-                    logger.info(
-                        f"    → Video URL: {state_update['generated_video_url']}"
-                    )
-
-                # Build filtered output (strips base64 images)
-                filtered_output = _get_filtered_output(node_name, state_update)
-
-                # Push node_done event
-                job_store.push_event(
-                    job_id,
-                    {
-                        "type": "node_done",
-                        "node": node_name,
-                        "output": filtered_output,
-                        "ts": time.time(),
-                    },
+                had_error = _push_node_events(
+                    job_id, node_name, state_update, step_count, total_steps
                 )
+                if had_error:
+                    return
 
-                # Update job store with full state
-                job_store.update(job_id, state_update)
-
-                # Check for errors
-                if state_update.get("error"):
-                    logger.error(f"")
-                    logger.error(f"{'=' * 60}")
-                    logger.error(f"PIPELINE FAILED at {node_name}")
-                    logger.error(f"Error: {state_update.get('error')}")
-                    logger.error(f"{'=' * 60}")
-                    job_store.update(job_id, {"status": "failed"})
+                # Push node_start for the next node (only within the creative phase)
+                if step_count < total_steps and node_name != "validate_prompt":
                     job_store.push_event(
                         job_id,
                         {
-                            "type": "done",
-                            "status": "failed",
-                            "error": state_update.get("error"),
+                            "type": "node_start",
+                            "node": NODE_ORDER[step_count],
                             "ts": time.time(),
                         },
                     )
+
+            # If we got here without error, the creative phase completed — pause
+            job_store.update(
+                job_id,
+                {"status": "paused", "current_step": "validate_prompt"},
+            )
+            job_store.push_event(
+                job_id,
+                {"type": "paused", "ts": time.time()},
+            )
+            logger.info(f"")
+            logger.info(f"{'=' * 60}")
+            logger.info(f"PIPELINE PAUSED after validate_prompt | Job: {job_id[:8]}...")
+            logger.info(f"{'=' * 60}")
+
+        # Run the blocking pipeline in a thread to keep the event loop free
+        await asyncio.to_thread(sync_runner)
+
+    except Exception as e:
+        logger.exception(f"Pipeline error for job {job_id}")
+        logger.error(f"")
+        logger.error(f"{'=' * 60}")
+        logger.error(f"PIPELINE CRASHED | Job: {job_id[:8]}...")
+        logger.error(f"Exception: {str(e)}")
+        logger.error(f"{'=' * 60}")
+        job_store.update(
+            job_id,
+            {"status": "failed", "error": str(e)},
+        )
+        job_store.push_event(
+            job_id,
+            {"type": "done", "status": "failed", "error": str(e), "ts": time.time()},
+        )
+
+
+async def run_resume_async(job_id: str, state: dict[str, Any]) -> None:
+    """
+    Resume the production phase of the pipeline (generate_scene_image → generate_video).
+
+    Pushes events to the same job's event log so the still-open SSE stream
+    picks them up automatically.
+
+    Args:
+        job_id: Job identifier
+        state: Accumulated pipeline state (includes any prompt edits)
+    """
+    from src.pipeline import stream_from_node
+
+    try:
+        logger.info(f"{'=' * 60}")
+        logger.info(f"PIPELINE RESUMED | Job: {job_id[:8]}...")
+        logger.info(f"{'=' * 60}")
+
+        # Update status to running
+        job_store.update(job_id, {"status": "running"})
+
+        # Push node_start for generate_scene_image
+        job_store.push_event(
+            job_id,
+            {"type": "node_start", "node": "generate_scene_image", "ts": time.time()},
+        )
+
+        def sync_runner() -> None:
+            """Run the remaining pipeline nodes in a thread."""
+            total_steps = len(NODE_ORDER)
+            # generate_scene_image is index 5 (0-based)
+            step_count = NODE_ORDER.index("generate_scene_image")
+
+            for node_name, state_update in stream_from_node(
+                state, "generate_scene_image"
+            ):
+                step_count += 1
+
+                had_error = _push_node_events(
+                    job_id, node_name, state_update, step_count, total_steps
+                )
+                if had_error:
                     return
 
                 # Push node_start for the next node
@@ -393,14 +510,13 @@ async def run_pipeline_async(job_id: str, initial_state: dict[str, Any]) -> None
             logger.info(f"PIPELINE COMPLETED | Job: {job_id[:8]}...")
             logger.info(f"{'=' * 60}")
 
-        # Run the blocking pipeline in a thread to keep the event loop free
         await asyncio.to_thread(sync_runner)
 
     except Exception as e:
-        logger.exception(f"Pipeline error for job {job_id}")
+        logger.exception(f"Pipeline resume error for job {job_id}")
         logger.error(f"")
         logger.error(f"{'=' * 60}")
-        logger.error(f"PIPELINE CRASHED | Job: {job_id[:8]}...")
+        logger.error(f"PIPELINE RESUME CRASHED | Job: {job_id[:8]}...")
         logger.error(f"Exception: {str(e)}")
         logger.error(f"{'=' * 60}")
         job_store.update(
@@ -528,6 +644,44 @@ async def stream_job_events(job_id: str):
     )
 
 
+@router.post("/pipeline/resume/{job_id}", response_model=PipelineResponse)
+async def resume_pipeline(
+    job_id: str,
+    request: ResumePipelineRequest,
+    background_tasks: BackgroundTasks,
+    _: str = Depends(verify_api_key),
+):
+    """
+    Resume a paused pipeline job.
+
+    Optionally accepts an edited video_prompt. Starts the production phase
+    (generate_scene_image → generate_video) as a background task.
+    """
+    job = job_store.get(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail=f"Job {job_id} not found")
+
+    state = job["state"]
+    if state.get("status") != "paused":
+        raise HTTPException(
+            status_code=409,
+            detail=f"Job {job_id} is not paused (status: {state.get('status')})",
+        )
+
+    # Apply edited prompt if provided
+    if request.video_prompt is not None:
+        state["video_prompt"] = request.video_prompt
+        job_store.update(job_id, {"video_prompt": request.video_prompt})
+
+    background_tasks.add_task(run_resume_async, job_id, state)
+
+    return PipelineResponse(
+        job_id=job_id,
+        status="resuming",
+        message="Pipeline resumed. Production phase starting.",
+    )
+
+
 @router.get("/pipeline/jobs/{job_id}", response_model=JobStatusResponse)
 async def get_job_status(
     job_id: str,
@@ -558,6 +712,7 @@ async def get_job_status(
         video_analysis=state.get("video_analysis"),
         video_prompt=state.get("video_prompt", ""),
         suggested_script=state.get("suggested_script", ""),
+        prompt_validation=state.get("prompt_validation"),
         scene_image_url=state.get("scene_image_url", ""),
         i2v_image_url=state.get("i2v_image_url", ""),
         generated_video_url=state.get("generated_video_url", ""),

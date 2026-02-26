@@ -50,6 +50,50 @@ LANGSMITH_ENABLED = os.getenv("LANGCHAIN_TRACING_V2", "").lower() == "true"
 LANGSMITH_API_KEY = os.getenv("LANGCHAIN_API_KEY")
 LANGSMITH_PROJECT = os.getenv("LANGCHAIN_PROJECT", "autougc-pipeline")
 
+# Max size (in chars) for any single string value sent to LangSmith.
+# Base64 images are typically millions of chars; LangSmith's limit is ~25MB total.
+_MAX_TRACE_STRING = 500
+
+# Keys whose values are known to contain large binary/base64 data
+_LARGE_DATA_KEYS = frozenset({
+    "product_images",
+    "frames",
+    "product_identity_pack",
+})
+
+
+def _strip_large_values(data: dict) -> dict:
+    """
+    Recursively strip large string values from a dict before sending to LangSmith.
+
+    Replaces base64 images and other large blobs with a short placeholder so
+    traces stay under LangSmith's 25MB payload limit.
+    """
+    if not isinstance(data, dict):
+        return data
+
+    out = {}
+    for k, v in data.items():
+        if k in _LARGE_DATA_KEYS and isinstance(v, (list, dict)):
+            if isinstance(v, list):
+                out[k] = f"<{len(v)} items, stripped for tracing>"
+            else:
+                out[k] = f"<dict with {len(v)} keys, stripped for tracing>"
+        elif isinstance(v, str) and len(v) > _MAX_TRACE_STRING:
+            out[k] = f"<{len(v)} chars, truncated>{v[:100]}..."
+        elif isinstance(v, dict):
+            out[k] = _strip_large_values(v)
+        elif isinstance(v, list):
+            out[k] = [
+                _strip_large_values(item) if isinstance(item, dict)
+                else (f"<{len(item)} chars>" if isinstance(item, str) and len(item) > _MAX_TRACE_STRING else item)
+                for item in v
+            ]
+        else:
+            out[k] = v
+    return out
+
+
 # Try to import langsmith for native tracing
 try:
     from langsmith import Client as LangSmithClient
@@ -60,6 +104,30 @@ except ImportError:
     LANGSMITH_AVAILABLE = False
     trace = None  # type: ignore
     LangSmithClient = None  # type: ignore
+
+
+def configure_langsmith_filtering():
+    """
+    Configure the global LangSmith tracing client to strip large data.
+
+    Call this once at server startup (after environment variables are loaded).
+    Sets a filtered Client into langsmith's _CLIENT ContextVar so LangGraph
+    automatically uses it for all pipeline traces.
+    """
+    if not is_tracing_enabled():
+        return
+
+    try:
+        from langsmith import Client
+        from langsmith.run_helpers import _CLIENT
+
+        filtered_client = Client(
+            hide_inputs=_strip_large_values,
+            hide_outputs=_strip_large_values,
+        )
+        _CLIENT.set(filtered_client)
+    except Exception:
+        pass  # Non-critical — traces will just fail with 422 as before
 
 
 def is_tracing_enabled() -> bool:
@@ -417,16 +485,10 @@ def _serialize_args(obj: Any, max_string_length: int = 10_000) -> Any:
     if isinstance(obj, (list, tuple)):
         return [_serialize_args(item, max_string_length) for item in obj]
     if isinstance(obj, dict):
-        # Filter out known large image fields
-        filtered = {}
-        for k, v in obj.items():
-            key = str(k)
-            # Skip large image data fields
-            if key in ("image_data", "base64_image", "image_bytes", "frames_data"):
-                filtered[key] = f"<image data excluded: ~{len(str(v))} bytes>"
-            else:
-                filtered[key] = _serialize_args(v, max_string_length)
-        return filtered
+        return {
+            str(k): _serialize_args(v, max_string_length)
+            for k, v in obj.items()
+        }
     if hasattr(obj, "__dict__"):
         return {
             "__class__": obj.__class__.__name__,

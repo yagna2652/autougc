@@ -40,13 +40,14 @@ export interface VideoAnalysisData {
 // Pipeline State and Result Types
 // =============================================================================
 
-export type PipelineStatus = "idle" | "running" | "completed" | "failed";
+export type PipelineStatus = "idle" | "running" | "paused" | "completed" | "failed";
 
 export type PipelineNodeId =
   | "download_video"
   | "extract_frames"
   | "analyze_video"
   | "generate_prompt"
+  | "validate_prompt"
   | "generate_scene_image"
   | "generate_video";
 
@@ -96,7 +97,13 @@ export interface StatusPipelineRequest {
   jobId: string;
 }
 
-export type PipelineRequest = StartPipelineRequest | StatusPipelineRequest;
+export interface ResumePipelineRequest {
+  action: "resume";
+  jobId: string;
+  videoPrompt?: string;
+}
+
+export type PipelineRequest = StartPipelineRequest | StatusPipelineRequest | ResumePipelineRequest;
 
 export interface StartPipelineResponse {
   jobId: string;
@@ -123,11 +130,12 @@ export interface RunHistoryEntry {
   jobId: string | null;
   videoUrl: string;
   videoModel: "sora" | "kling" | "kling-v3";
-  status: "running" | "completed" | "failed";
+  status: "running" | "paused" | "completed" | "failed";
   startedAt: number;
   updatedAt: number;
   error: string | null;
   nodeStates: Record<string, SerializedNodeState>;
   sceneImageUrl: string | null;
   generatedVideoUrl: string | null;
+  templateVersion: number | null;
 }

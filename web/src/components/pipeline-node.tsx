@@ -5,6 +5,7 @@ import {
   Layers,
   ScanEye,
   Sparkles,
+  ShieldCheck,
   ImagePlus,
   Clapperboard,
   Zap,
@@ -17,6 +18,7 @@ type IconName =
   | "Layers"
   | "ScanEye"
   | "Sparkles"
+  | "ShieldCheck"
   | "ImagePlus"
   | "Clapperboard"
   | "Zap";
@@ -26,6 +28,7 @@ const ICONS: Record<IconName, React.ComponentType<LucideProps>> = {
   Layers,
   ScanEye,
   Sparkles,
+  ShieldCheck,
   ImagePlus,
   Clapperboard,
   Zap,

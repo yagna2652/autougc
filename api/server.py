@@ -31,6 +31,10 @@ for logger_name in ["src.pipeline", "api", "uvicorn"]:
 logging.getLogger("httpx").setLevel(logging.WARNING)
 logging.getLogger("httpcore").setLevel(logging.WARNING)
 
+# Configure LangSmith to strip large base64 data from traces
+from src.tracing import configure_langsmith_filtering
+configure_langsmith_filtering()
+
 import uvicorn
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -79,10 +83,12 @@ async def root():
     }
 
 
-# Import and include pipeline router
+# Import and include routers
 from api.routes.pipeline import router as pipeline_router
+from api.routes.prompts import router as prompts_router
 
 app.include_router(pipeline_router, prefix="/api/v1", tags=["pipeline"])
+app.include_router(prompts_router, prefix="/api/v1", tags=["prompts"])
 
 
 if __name__ == "__main__":

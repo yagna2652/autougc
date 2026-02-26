@@ -6,8 +6,9 @@ A clean, minimal pipeline:
 2. Extract frames
 3. Analyze with vision model (OpenRouter)
 4. Generate video prompt
-5. Generate scene image (composite product into TikTok-style scene)
-6. Generate video
+5. Validate video prompt quality
+6. Generate scene image (composite product into TikTok-style scene)
+7. Generate video
 
 All steps are traced via LangSmith for observability.
 """
@@ -30,6 +31,7 @@ from src.pipeline.nodes.extract_frames import extract_frames_node
 from src.pipeline.nodes.generate_prompt import generate_prompt_node
 from src.pipeline.nodes.generate_scene_image import generate_scene_image_node
 from src.pipeline.nodes.generate_video import generate_video_node
+from src.pipeline.nodes.validate_prompt import validate_prompt_node
 
 
 # Human-readable descriptions for logging
@@ -38,6 +40,7 @@ NODE_DESCRIPTIONS = {
     "extract_frames": "Extracting key frames from video",
     "analyze_video": "Analyzing video style with vision model",
     "generate_prompt": "Generating video prompt",
+    "validate_prompt": "Validating video prompt quality",
     "generate_scene_image": "Generating scene image (Nano Banana Pro)",
     "generate_video": "Generating video (this takes 2-5 minutes)",
 }
@@ -73,7 +76,7 @@ def build_pipeline() -> StateGraph:
     Build the simple UGC generation pipeline.
 
     Flow:
-        START → download → extract_frames → analyze_video → generate_prompt → generate_scene_image → generate_video → END
+        START → download → extract_frames → analyze_video → generate_prompt → validate_prompt → generate_scene_image → generate_video → END
 
     Returns:
         Compiled StateGraph ready for execution
@@ -93,6 +96,9 @@ def build_pipeline() -> StateGraph:
     )
     workflow.add_node(
         "generate_prompt", with_logging("generate_prompt", generate_prompt_node)
+    )
+    workflow.add_node(
+        "validate_prompt", with_logging("validate_prompt", validate_prompt_node)
     )
     workflow.add_node(
         "generate_scene_image",
@@ -134,6 +140,15 @@ def build_pipeline() -> StateGraph:
 
     workflow.add_conditional_edges(
         "generate_prompt",
+        should_continue,
+        {
+            "continue": "validate_prompt",
+            "end": END,
+        },
+    )
+
+    workflow.add_conditional_edges(
+        "validate_prompt",
         should_continue,
         {
             "continue": "generate_scene_image",
@@ -225,12 +240,13 @@ async def run_pipeline_async(initial_state: PipelineState) -> PipelineState:
     return final_state
 
 
-def stream_pipeline(initial_state: PipelineState):
+def stream_pipeline(initial_state: PipelineState, stop_after: str | None = None):
     """
     Stream pipeline execution with real-time updates.
 
     Args:
         initial_state: Initial pipeline state
+        stop_after: If set, stop yielding after this node completes
 
     Yields:
         Tuples of (node_name, state_update) for each step
@@ -243,3 +259,54 @@ def stream_pipeline(initial_state: PipelineState):
         for node_name, state_update in output.items():
             logger.info(f"Completed: {node_name}")
             yield node_name, state_update
+            if stop_after and node_name == stop_after:
+                return
+
+
+# Ordered mapping of node name → function for direct invocation (resume path)
+ORDERED_NODES = [
+    ("download_video", download_video_node),
+    ("extract_frames", extract_frames_node),
+    ("analyze_video", analyze_video_node),
+    ("generate_prompt", generate_prompt_node),
+    ("validate_prompt", validate_prompt_node),
+    ("generate_scene_image", generate_scene_image_node),
+    ("generate_video", generate_video_node),
+]
+
+
+def stream_from_node(state: dict[str, Any], start_node: str):
+    """
+    Resume pipeline from a specific node, calling node functions directly.
+
+    Bypasses LangGraph and calls the wrapped node functions in sequence
+    starting from ``start_node``.
+
+    Args:
+        state: Accumulated pipeline state (must contain all fields up to start_node)
+        start_node: Node name to start from (inclusive)
+
+    Yields:
+        Tuples of (node_name, state_update) for each step
+    """
+    found = False
+    for node_name, node_func in ORDERED_NODES:
+        if node_name == start_node:
+            found = True
+        if not found:
+            continue
+
+        desc = NODE_DESCRIPTIONS.get(node_name, node_name)
+        logger.info(f"▶ STARTING (resume): {desc}...")
+        result = node_func(state)
+        if result.get("error"):
+            logger.error(f"✗ FAILED (resume): {desc} - {result.get('error')}")
+        else:
+            logger.info(f"✓ DONE (resume): {desc}")
+
+        # Merge result into state for subsequent nodes
+        state.update(result)
+        yield node_name, result
+
+        if result.get("error"):
+            return

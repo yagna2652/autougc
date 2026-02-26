@@ -6,7 +6,6 @@ This allows running the pipeline with just a TikTok URL - the product
 info is loaded automatically from the configured product folder.
 """
 
-import base64
 import io
 import json
 import logging
@@ -165,7 +164,7 @@ def load_product(product_name: str = DEFAULT_PRODUCT) -> dict[str, Any]:
             - name: Product name
             - description: Product description
             - category: Product category
-            - images: List of base64-encoded images
+            - images: List of file paths to product images
 
     Raises:
         FileNotFoundError: If product folder or config doesn't exist
@@ -189,20 +188,8 @@ def load_product(product_name: str = DEFAULT_PRODUCT) -> dict[str, Any]:
 
     for file_path in sorted(product_dir.iterdir()):
         if file_path.suffix.lower() in image_extensions:
-            try:
-                with open(file_path, "rb") as f:
-                    image_data = f.read()
-
-                # Resize if needed to fit under Claude API limit
-                image_data, mime_type = resize_image_if_needed(
-                    image_data, file_path.name
-                )
-
-                encoded = base64.b64encode(image_data).decode("utf-8")
-                images.append(f"data:{mime_type};base64,{encoded}")
-                logger.debug(f"Loaded product image: {file_path.name}")
-            except Exception as e:
-                logger.warning(f"Failed to load image {file_path}: {e}")
+            images.append(str(file_path))
+            logger.debug(f"Loaded product image path: {file_path.name}")
 
     logger.info(
         f"Loaded product '{config.get('name')}' with {len(images)} images"
@@ -222,7 +209,7 @@ def load_default_product() -> tuple[str, list[str], str, str]:
     Load the default product (keychain).
 
     Returns:
-        Tuple of (description, images_base64, category, mechanics)
+        Tuple of (description, image_paths, category, mechanics)
     """
     try:
         product = load_product(DEFAULT_PRODUCT)

@@ -10,7 +10,7 @@ Minimal state that flows through the pipeline:
 """
 
 import logging
-from typing import Any, Literal, TypedDict
+from typing import Literal, TypedDict
 
 from src.pipeline.types import (
     PipelineConfig,
@@ -20,52 +20,8 @@ from src.pipeline.types import (
 
 logger = logging.getLogger(__name__)
 
-
-def _serialize_for_langsmith(state: dict[str, Any]) -> dict[str, Any]:
-    """
-    Custom serializer for LangSmith tracing that excludes large binary data.
-
-    LangSmith has a 25MB limit per field. Base64 images easily exceed this.
-    We exclude them from traces since they provide no debugging value.
-    """
-    serialized = {}
-
-    for key, value in state.items():
-        # Exclude large image fields that bloat traces
-        if key == "product_images":
-            # Just track count and size instead of full data
-            if isinstance(value, list):
-                total_size = sum(len(str(img)) for img in value)
-                serialized[key] = f"<{len(value)} images, ~{total_size // 1024}KB total>"
-            else:
-                serialized[key] = "<image data excluded>"
-
-        elif key == "frames":
-            # Just track count of frames
-            if isinstance(value, list):
-                serialized[key] = f"<{len(value)} frames extracted>"
-            else:
-                serialized[key] = "<frames data excluded>"
-
-        elif key == "product_identity_pack":
-            # Identity pack may contain base64 images
-            if isinstance(value, dict):
-                pack_summary = {
-                    k: f"<image: {len(str(v)) // 1024}KB>" if isinstance(v, str) and len(str(v)) > 1000 else v
-                    for k, v in value.items()
-                }
-                serialized[key] = pack_summary
-            else:
-                serialized[key] = value
-
-        else:
-            # Keep all other fields (text, URLs, configs, etc.)
-            serialized[key] = value
-
-    return serialized
-
 # Status type for pipeline state
-PipelineStatus = Literal["pending", "running", "completed", "failed"]
+PipelineStatus = Literal["pending", "running", "paused", "completed", "failed"]
 
 
 class PipelineState(TypedDict, total=False):
@@ -84,7 +40,7 @@ class PipelineState(TypedDict, total=False):
     # Input
     video_url: str
     product_description: str
-    product_images: list[str]  # base64 or URLs
+    product_images: list[str]  # file paths, URLs, or data URLs
     product_identity_pack: ProductReference  # multi-angle identity references
     product_category: str  # e.g., 'mechanical_keyboard_keychain'
     product_mechanics: str  # prose describing physical interaction rules
@@ -99,6 +55,7 @@ class PipelineState(TypedDict, total=False):
     video_prompt: str  # Generated prompt for video API
     suggested_script: str  # Suggested script/voiceover
     scene_description: str  # Prompt for scene image generation (Nano Banana Pro)
+    prompt_validation: dict  # Validation results from validate_prompt node
 
     # Scene image (composited first frame for I2V)
     scene_image_url: str  # Fal CDN URL of generated scene image
@@ -196,6 +153,7 @@ def create_initial_state(
         video_prompt="",
         suggested_script="",
         scene_description="",
+        prompt_validation={},
         scene_image_url="",
         i2v_image_url="",
         generated_video_url="",
