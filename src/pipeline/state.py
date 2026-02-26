@@ -21,7 +21,7 @@ from src.pipeline.types import (
 logger = logging.getLogger(__name__)
 
 # Status type for pipeline state
-PipelineStatus = Literal["pending", "running", "completed", "failed"]
+PipelineStatus = Literal["pending", "running", "paused", "completed", "failed"]
 
 
 class PipelineState(TypedDict, total=False):

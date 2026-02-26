@@ -240,12 +240,13 @@ async def run_pipeline_async(initial_state: PipelineState) -> PipelineState:
     return final_state
 
 
-def stream_pipeline(initial_state: PipelineState):
+def stream_pipeline(initial_state: PipelineState, stop_after: str | None = None):
     """
     Stream pipeline execution with real-time updates.
 
     Args:
         initial_state: Initial pipeline state
+        stop_after: If set, stop yielding after this node completes
 
     Yields:
         Tuples of (node_name, state_update) for each step
@@ -258,3 +259,54 @@ def stream_pipeline(initial_state: PipelineState):
         for node_name, state_update in output.items():
             logger.info(f"Completed: {node_name}")
             yield node_name, state_update
+            if stop_after and node_name == stop_after:
+                return
+
+
+# Ordered mapping of node name → function for direct invocation (resume path)
+ORDERED_NODES = [
+    ("download_video", download_video_node),
+    ("extract_frames", extract_frames_node),
+    ("analyze_video", analyze_video_node),
+    ("generate_prompt", generate_prompt_node),
+    ("validate_prompt", validate_prompt_node),
+    ("generate_scene_image", generate_scene_image_node),
+    ("generate_video", generate_video_node),
+]
+
+
+def stream_from_node(state: dict[str, Any], start_node: str):
+    """
+    Resume pipeline from a specific node, calling node functions directly.
+
+    Bypasses LangGraph and calls the wrapped node functions in sequence
+    starting from ``start_node``.
+
+    Args:
+        state: Accumulated pipeline state (must contain all fields up to start_node)
+        start_node: Node name to start from (inclusive)
+
+    Yields:
+        Tuples of (node_name, state_update) for each step
+    """
+    found = False
+    for node_name, node_func in ORDERED_NODES:
+        if node_name == start_node:
+            found = True
+        if not found:
+            continue
+
+        desc = NODE_DESCRIPTIONS.get(node_name, node_name)
+        logger.info(f"▶ STARTING (resume): {desc}...")
+        result = node_func(state)
+        if result.get("error"):
+            logger.error(f"✗ FAILED (resume): {desc} - {result.get('error')}")
+        else:
+            logger.info(f"✓ DONE (resume): {desc}")
+
+        # Merge result into state for subsequent nodes
+        state.update(result)
+        yield node_name, result
+
+        if result.get("error"):
+            return

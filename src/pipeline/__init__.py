@@ -25,37 +25,18 @@ LangSmith tracing is automatically enabled when configured.
 from importlib import import_module
 from typing import Any
 
+# Direct imports — resolved at import time (no deadlock)
+from src.pipeline.state import PipelineState, create_initial_state, DEFAULT_CONFIG
+from src.pipeline.types import VideoAnalysisData, CameraInfo, PersonInfo, PipelineConfig
+from src.pipeline.product_loader import load_product, load_default_product, get_available_products
+
 
 def _resolve(module_path: str, attr_name: str) -> Any:
     module = import_module(module_path)
     return getattr(module, attr_name)
 
 
-def __getattr__(name: str) -> Any:
-    export_map = {
-        # State
-        "PipelineState": ("src.pipeline.state", "PipelineState"),
-        "create_initial_state": ("src.pipeline.state", "create_initial_state"),
-        "DEFAULT_CONFIG": ("src.pipeline.state", "DEFAULT_CONFIG"),
-        # Types
-        "VideoAnalysisData": ("src.pipeline.types", "VideoAnalysisData"),
-        "CameraInfo": ("src.pipeline.types", "CameraInfo"),
-        "PersonInfo": ("src.pipeline.types", "PersonInfo"),
-        "PipelineConfig": ("src.pipeline.types", "PipelineConfig"),
-        # Product loader
-        "load_product": ("src.pipeline.product_loader", "load_product"),
-        "load_default_product": ("src.pipeline.product_loader", "load_default_product"),
-        "get_available_products": ("src.pipeline.product_loader", "get_available_products"),
-    }
-
-    if name not in export_map:
-        raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
-
-    module_path, attr_name = export_map[name]
-    value = _resolve(module_path, attr_name)
-    globals()[name] = value
-    return value
-
+# Runtime wrappers — _resolve() only called when these functions are invoked, not imported
 
 def build_pipeline():
     return _resolve("src.pipeline.graphs.simple_pipeline", "build_pipeline")()
@@ -73,8 +54,12 @@ async def run_pipeline_async(initial_state: Any):
     return await _resolve("src.pipeline.graphs.simple_pipeline", "run_pipeline_async")(initial_state)
 
 
-def stream_pipeline(initial_state: Any):
-    return _resolve("src.pipeline.graphs.simple_pipeline", "stream_pipeline")(initial_state)
+def stream_pipeline(initial_state: Any, stop_after: Any = None):
+    return _resolve("src.pipeline.graphs.simple_pipeline", "stream_pipeline")(initial_state, stop_after=stop_after)
+
+
+def stream_from_node(state: Any, start_node: str):
+    return _resolve("src.pipeline.graphs.simple_pipeline", "stream_from_node")(state, start_node)
 
 __all__ = [
     # State
@@ -96,4 +81,5 @@ __all__ = [
     "run_pipeline",
     "run_pipeline_async",
     "stream_pipeline",
+    "stream_from_node",
 ]

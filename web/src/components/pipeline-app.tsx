@@ -124,6 +124,7 @@ export function PipelineApp() {
         setFalKey={pipeline.setFalKey}
         pipelineStatus={pipeline.pipelineStatus}
         startPipeline={pipeline.startPipeline}
+        resumePipeline={pipeline.resumePipeline}
         resetPipeline={pipeline.resetPipeline}
         error={pipeline.error}
       />

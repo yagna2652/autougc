@@ -60,6 +60,7 @@ export function InputForm({
   const fileInputRef = useRef<HTMLInputElement>(null);
   const angleInputRefs = useRef<Record<string, HTMLInputElement | null>>({});
   const isRunning = pipelineStatus === "running";
+  const isPaused = pipelineStatus === "paused";
   const isDone = pipelineStatus === "completed" || pipelineStatus === "failed";
 
   const inputStyle: React.CSSProperties = {
@@ -420,6 +421,18 @@ export function InputForm({
         >
           Run Again
         </button>
+      ) : isPaused ? (
+        <div
+          style={{
+            width: "100%", padding: "11px 0", borderRadius: 8,
+            border: "1px solid rgba(245,158,11,0.25)",
+            background: "rgba(245,158,11,0.06)",
+            color: "#fbbf24", fontSize: 13, fontWeight: 500,
+            textAlign: "center",
+          }}
+        >
+          Paused — review prompt to continue
+        </div>
       ) : (
         <button
           onClick={startPipeline}

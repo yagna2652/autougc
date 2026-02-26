@@ -11,7 +11,7 @@ export interface NodeState {
   output: Record<string, unknown> | null;
 }
 
-export type PipelineStatus = "idle" | "running" | "completed" | "failed";
+export type PipelineStatus = "idle" | "running" | "paused" | "completed" | "failed";
 
 function makeInitialNodeStates(): Record<string, NodeState> {
   return Object.fromEntries(
@@ -146,6 +146,10 @@ export function usePipeline(callbacks?: PipelineCallbacks) {
             return next;
           });
           setSelectedNode(node);
+        } else if (eventType === "paused") {
+          setPipelineStatus("paused");
+          setSelectedNode("validate_prompt");
+          // Do NOT close EventSource — resume will push more events
         } else if (eventType === "done") {
           const status = event.status as string;
           const finalStatus = status === "completed" ? "completed" : "failed";
@@ -189,6 +193,39 @@ export function usePipeline(callbacks?: PipelineCallbacks) {
       }
     }
   }, [videoUrl, videoModel, productImages, identityPack, useIdentityPack, useTailImage, pipelineStatus, falKey]);
+
+  const resumePipeline = useCallback(async (editedPrompt?: string) => {
+    if (pipelineStatus !== "paused" || !jobId) return;
+
+    setError(null);
+    setPipelineStatus("running");
+
+    try {
+      const response = await fetch("/api/pipeline", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "resume",
+          jobId,
+          videoPrompt: editedPrompt,
+        }),
+      });
+
+      const data = await response.json();
+      if (!response.ok || data.error) {
+        throw new Error(data.error || "Failed to resume pipeline");
+      }
+      // The SSE connection is still open — new events will flow through automatically
+    } catch (err) {
+      const errMsg = err instanceof Error ? err.message : "Unknown error";
+      setError(errMsg);
+      setPipelineStatus("failed");
+
+      if (activeRunIdRef.current) {
+        callbacksRef.current?.onRunComplete?.(activeRunIdRef.current, "failed", errMsg);
+      }
+    }
+  }, [pipelineStatus, jobId]);
 
   const resetPipeline = useCallback(() => {
     if (eventSourceRef.current) {
@@ -259,7 +296,7 @@ export function usePipeline(callbacks?: PipelineCallbacks) {
         ? (entry.nodeStates as Record<string, NodeState>)
         : makeInitialNodeStates()
     );
-    setPipelineStatus(entry.status === "running" ? "idle" : entry.status);
+    setPipelineStatus(entry.status === "running" ? "idle" : (entry.status as PipelineStatus));
     setJobId(entry.jobId);
     setVideoUrl(entry.videoUrl);
     setVideoModel(entry.videoModel);
@@ -297,6 +334,7 @@ export function usePipeline(callbacks?: PipelineCallbacks) {
     setFalKey: persistFalKey,
     error,
     startPipeline,
+    resumePipeline,
     resetPipeline,
     restoreRun,
     activeRunId: activeRunIdRef.current,

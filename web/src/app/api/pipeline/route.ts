@@ -10,6 +10,7 @@ import { NextRequest, NextResponse } from "next/server";
 import type {
   StartPipelineRequest,
   StatusPipelineRequest,
+  ResumePipelineRequest,
   PipelineRequest,
   PipelineResult,
   VideoAnalysisData,
@@ -38,9 +39,11 @@ export async function POST(request: NextRequest) {
         return handleStart(body);
       case "status":
         return handleStatus(body);
+      case "resume":
+        return handleResume(body as ResumePipelineRequest);
       default:
         return NextResponse.json(
-          { error: "Invalid action. Use 'start' or 'status'" },
+          { error: "Invalid action. Use 'start', 'status', or 'resume'" },
           { status: 400 },
         );
     }
@@ -142,6 +145,45 @@ async function handleStatus(body: StatusPipelineRequest): Promise<NextResponse> 
   } catch {
     return NextResponse.json(
       { error: "Backend not reachable", status: "running", currentStep: "waiting" },
+      { status: 502 },
+    );
+  }
+}
+
+async function handleResume(body: ResumePipelineRequest): Promise<NextResponse> {
+  try {
+    const requestBody: Record<string, unknown> = {};
+    if (body.videoPrompt !== undefined) {
+      requestBody.video_prompt = body.videoPrompt;
+    }
+
+    const response = await fetch(
+      `${PYTHON_API_URL}/api/v1/pipeline/resume/${body.jobId}`,
+      {
+        method: "POST",
+        headers: getAuthHeaders(),
+        body: JSON.stringify(requestBody),
+      },
+    );
+
+    const data = await response.json();
+
+    if (!response.ok) {
+      return NextResponse.json(
+        { error: data.detail || "Failed to resume pipeline" },
+        { status: response.status },
+      );
+    }
+
+    return NextResponse.json({
+      success: true,
+      jobId: data.job_id,
+      status: data.status,
+      message: data.message,
+    });
+  } catch {
+    return NextResponse.json(
+      { error: "Backend not reachable" },
       { status: 502 },
     );
   }

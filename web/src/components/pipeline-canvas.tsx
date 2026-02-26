@@ -11,8 +11,8 @@ interface PipelineCanvasProps {
   onSelectNode: (id: string) => void;
 }
 
-function ArrowConnector({ isActive }: { isActive: boolean }) {
-  const color = isActive ? "#3b82f6" : "rgba(255,255,255,0.1)";
+function ArrowConnector({ isActive, isPaused }: { isActive: boolean; isPaused?: boolean }) {
+  const color = isPaused ? "#f59e0b" : isActive ? "#3b82f6" : "rgba(255,255,255,0.1)";
   return (
     <svg
       width="48"
@@ -27,7 +27,7 @@ function ArrowConnector({ isActive }: { isActive: boolean }) {
         y2="55"
         stroke={color}
         strokeWidth="1.5"
-        strokeDasharray={isActive ? "4 4" : undefined}
+        strokeDasharray={isActive || isPaused ? "4 4" : undefined}
         style={
           isActive
             ? { animation: "dash-flow 0.5s linear infinite" }
@@ -35,6 +35,12 @@ function ArrowConnector({ isActive }: { isActive: boolean }) {
         }
       />
       <polygon points="33,51 44,55 33,59" fill={color} />
+      {isPaused && (
+        <>
+          <rect x="16" y="48" width="3" height="14" rx="1" fill="#f59e0b" />
+          <rect x="22" y="48" width="3" height="14" rx="1" fill="#f59e0b" />
+        </>
+      )}
     </svg>
   );
 }
@@ -90,6 +96,12 @@ export function PipelineCanvas({
             : null;
           const arrowActive = nextNodeState?.status === "running";
 
+          // Arrow between validate_prompt and generate_scene_image shows pause indicator
+          const arrowPaused =
+            pipelineStatus === "paused" &&
+            node.id === "validate_prompt" &&
+            nextNode?.id === "generate_scene_image";
+
           return (
             <div
               key={node.id}
@@ -104,7 +116,7 @@ export function PipelineCanvas({
                 isSelected={selectedNode === node.id}
                 onClick={() => onSelectNode(node.id)}
               />
-              {!isLast && <ArrowConnector isActive={arrowActive} />}
+              {!isLast && <ArrowConnector isActive={arrowActive} isPaused={arrowPaused} />}
             </div>
           );
         })}
