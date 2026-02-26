@@ -457,22 +457,28 @@ function ValidatePromptOutput({
               <span style={{ color: "#93c5fd", fontSize: 11 }}>(prompt was rewritten)</span>
             )}
           </div>
-          {Array.isArray(validation.issues) && (validation.issues as string[]).length > 0 && (
+          {Array.isArray(validation.issues) && validation.issues.length > 0 && (
             <div style={{ marginTop: 8, display: "flex", flexDirection: "column", gap: 4 }}>
-              {(validation.issues as string[]).map((issue, i) => (
-                <div
-                  key={i}
-                  style={{
-                    color: "#fbbf24",
-                    fontSize: 11,
-                    padding: "4px 8px",
-                    background: "rgba(245,158,11,0.04)",
-                    borderRadius: 4,
-                  }}
-                >
-                  {issue}
-                </div>
-              ))}
+              {(validation.issues as Array<string | Record<string, unknown>>).map((issue, i) => {
+                const text =
+                  typeof issue === "string"
+                    ? issue
+                    : (issue.description as string) ?? JSON.stringify(issue);
+                return (
+                  <div
+                    key={i}
+                    style={{
+                      color: "#fbbf24",
+                      fontSize: 11,
+                      padding: "4px 8px",
+                      background: "rgba(245,158,11,0.04)",
+                      borderRadius: 4,
+                    }}
+                  >
+                    {text}
+                  </div>
+                );
+              })}
             </div>
           )}
         </div>
