@@ -1,5 +1,6 @@
 "use client";
 
+import { useRef, useCallback } from "react";
 import { PipelineNode } from "./pipeline-node";
 import { NODE_DEFINITIONS, INPUT_NODE } from "@/lib/nodes";
 import type { NodeState, PipelineStatus } from "@/hooks/use-pipeline";
@@ -52,6 +53,35 @@ export function PipelineCanvas({
   onSelectNode,
 }: PipelineCanvasProps) {
   const allNodes = [INPUT_NODE, ...NODE_DEFINITIONS];
+  const containerRef = useRef<HTMLDivElement>(null);
+  const dragState = useRef({ active: false, startX: 0, scrollLeft: 0, moved: false });
+
+  const onPointerDown = useCallback((e: React.PointerEvent) => {
+    const el = containerRef.current;
+    if (!el) return;
+    // Only primary button (left click)
+    if (e.button !== 0) return;
+    dragState.current = { active: true, startX: e.clientX, scrollLeft: el.scrollLeft, moved: false };
+    el.setPointerCapture(e.pointerId);
+    el.style.cursor = "grabbing";
+  }, []);
+
+  const onPointerMove = useCallback((e: React.PointerEvent) => {
+    const ds = dragState.current;
+    if (!ds.active) return;
+    const dx = e.clientX - ds.startX;
+    if (Math.abs(dx) > 3) ds.moved = true;
+    containerRef.current!.scrollLeft = ds.scrollLeft - dx;
+  }, []);
+
+  const onPointerUp = useCallback((e: React.PointerEvent) => {
+    const ds = dragState.current;
+    if (!ds.active) return;
+    ds.active = false;
+    const el = containerRef.current!;
+    el.releasePointerCapture(e.pointerId);
+    el.style.cursor = "grab";
+  }, []);
 
   function getInputNodeStatus() {
     if (pipelineStatus === "idle") return "input-idle" as const;
@@ -60,15 +90,21 @@ export function PipelineCanvas({
 
   return (
     <div
+      ref={containerRef}
+      onPointerDown={onPointerDown}
+      onPointerMove={onPointerMove}
+      onPointerUp={onPointerUp}
+      onPointerCancel={onPointerUp}
       style={{
         flex: 1,
         display: "flex",
         alignItems: "center",
-        justifyContent: "center",
         minHeight: "100vh",
         overflowX: "auto",
         overflowY: "hidden",
         padding: "0 48px",
+        cursor: "grab",
+        userSelect: "none",
       }}
     >
       <div
@@ -76,6 +112,7 @@ export function PipelineCanvas({
           display: "flex",
           alignItems: "center",
           flexShrink: 0,
+          margin: "0 auto",
         }}
       >
         {allNodes.map((node, index) => {
@@ -114,7 +151,9 @@ export function PipelineCanvas({
                 iconName={node.iconName}
                 status={status}
                 isSelected={selectedNode === node.id}
-                onClick={() => onSelectNode(node.id)}
+                onClick={() => {
+                  if (!dragState.current.moved) onSelectNode(node.id);
+                }}
               />
               {!isLast && <ArrowConnector isActive={arrowActive} isPaused={arrowPaused} />}
             </div>
