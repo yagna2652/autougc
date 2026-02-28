@@ -126,7 +126,7 @@ class PipelineConfigModel(BaseModel):
     )
     num_frames: int = Field(default=5, description="Number of frames to extract")
     video_model: str = Field(
-        default="sora", description="Video model (sora, kling, or kling-v3)"
+        default="sora", description="Video model (sora, kling, kling-v3, or kling-o3-ref)"
     )
     video_duration: int = Field(default=5, description="Video duration in seconds")
     aspect_ratio: str = Field(default="9:16", description="Video aspect ratio")
@@ -232,6 +232,7 @@ STEP_DESCRIPTIONS = {
     "extract_frames": "Extracting key frames from video...",
     "analyze_video": "Analyzing video style with vision model...",
     "generate_prompt": "Generating video prompt...",
+    "distill_prompt": "Distilling prompt for video model...",
     "validate_prompt": "Validating video prompt quality...",
     "generate_scene_image": "Generating scene image with Nano Banana Pro...",
     "generate_video": "Generating video with AI (this may take 2-5 minutes)...",
@@ -243,6 +244,7 @@ NODE_ORDER = [
     "extract_frames",
     "analyze_video",
     "generate_prompt",
+    "distill_prompt",
     "validate_prompt",
     "generate_scene_image",
     "generate_video",
@@ -264,6 +266,11 @@ def _get_filtered_output(node_name: str, state_update: dict) -> dict:
             "scene_description": state_update.get("scene_description"),
             "trace_id": state_update.get("trace_id"),
             "template_version": state_update.get("template_version"),
+        }
+    elif node_name == "distill_prompt":
+        return {
+            "original_video_prompt": state_update.get("original_video_prompt"),
+            "video_prompt": state_update.get("video_prompt"),
         }
     elif node_name == "validate_prompt":
         return {

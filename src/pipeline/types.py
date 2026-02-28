@@ -74,7 +74,7 @@ class PipelineConfig(TypedDict, total=False):
 
     vision_model: str  # e.g., "openai/gpt-4o-mini"
     num_frames: int  # Number of frames to extract
-    video_model: Literal["sora", "kling", "kling-v3"] | str
+    video_model: Literal["sora", "kling", "kling-v3", "kling-o3-ref"] | str
     video_duration: int  # Duration in seconds
     aspect_ratio: str  # e.g., "9:16"
     i2v_image_index: int  # Which product image to use for I2V

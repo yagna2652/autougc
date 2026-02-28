@@ -1,6 +1,7 @@
 "use client";
 
 import { useRef } from "react";
+import type { VideoModel } from "@/types/pipeline";
 import type { PipelineStatus } from "@/hooks/use-pipeline";
 
 const IDENTITY_ANGLES = [
@@ -15,8 +16,8 @@ const IDENTITY_ANGLES = [
 interface InputFormProps {
   videoUrl: string;
   setVideoUrl: (url: string) => void;
-  videoModel: "sora" | "kling" | "kling-v3";
-  setVideoModel: (model: "sora" | "kling" | "kling-v3") => void;
+  videoModel: VideoModel;
+  setVideoModel: (model: VideoModel) => void;
   productImages: string[];
   handleImageUpload: (files: FileList | null) => void;
   removeImage: (index: number) => void;
@@ -151,6 +152,9 @@ export function InputForm({
           style={{ display: "none" }}
           onChange={(e) => handleImageUpload(e.target.files)}
         />
+        <div style={{ color: "#555", fontSize: 11, marginTop: 6, lineHeight: 1.4 }}>
+          First image = front view. Upload 3–4 angles for best video quality.
+        </div>
         {productImages.length > 0 && (
           <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginTop: 10 }}>
             {productImages.map((img, i) => (
@@ -199,7 +203,7 @@ export function InputForm({
               Identity Pack
             </div>
             <div style={{ color: "#555", fontSize: 11, marginTop: 2 }}>
-              Multi-angle refs · Kling V3 only
+              Multi-angle refs · Kling V3 / O3
             </div>
           </div>
           {/* Toggle */}
@@ -334,7 +338,7 @@ export function InputForm({
             </button>
 
             <div style={{ marginTop: 10, color: "#444", fontSize: 11, lineHeight: 1.5 }}>
-              Model locked to <span style={{ color: "#a855f7" }}>kling-v3</span> · Identity selector
+              Model locked to <span style={{ color: "#a855f7" }}>kling-v3</span> or <span style={{ color: "#a855f7" }}>kling-o3-ref</span> · Identity selector
               picks angles from video analysis context
             </div>
           </>
@@ -360,12 +364,16 @@ export function InputForm({
       <div>
         <label style={labelStyle}>Video Model</label>
         <div style={{ display: "flex", gap: 8 }}>
-          {(["sora", "kling", "kling-v3"] as const).map((m) => {
-            const locked = useIdentityPack && m !== "kling-v3";
+          {(["sora", "kling", "kling-v3", "kling-o3-ref"] as const).map((m) => {
+            const locked = useIdentityPack && m !== "kling-v3" && m !== "kling-o3-ref";
             return (
               <button
                 key={m}
-                onClick={() => !isRunning && !locked && setVideoModel(m)}
+                onClick={() => {
+                  if (isRunning || locked) return;
+                  setVideoModel(m);
+                  if (m === "kling-o3-ref" && !useIdentityPack) toggleIdentityPack(true);
+                }}
                 disabled={isRunning || locked}
                 style={{
                   flex: 1,
@@ -388,7 +396,7 @@ export function InputForm({
         </div>
         {useIdentityPack && (
           <div style={{ color: "#555", fontSize: 11, marginTop: 6 }}>
-            Locked to kling-v3 while Identity Pack is enabled
+            Locked to kling-v3 / kling-o3-ref while Identity Pack is enabled
           </div>
         )}
       </div>

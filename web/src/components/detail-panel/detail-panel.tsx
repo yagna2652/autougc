@@ -2,6 +2,7 @@
 
 import { X } from "lucide-react";
 import { NODE_DEFINITIONS, INPUT_NODE } from "@/lib/nodes";
+import type { VideoModel } from "@/types/pipeline";
 import { InputForm } from "../left-sidebar";
 import type { NodeState, PipelineStatus } from "@/hooks/use-pipeline";
 import { NodeOutputContent } from "./node-output-content";
@@ -13,8 +14,8 @@ interface DetailPanelProps {
   // Input form props
   videoUrl: string;
   setVideoUrl: (url: string) => void;
-  videoModel: "sora" | "kling" | "kling-v3";
-  setVideoModel: (model: "sora" | "kling" | "kling-v3") => void;
+  videoModel: VideoModel;
+  setVideoModel: (model: VideoModel) => void;
   productImages: string[];
   handleImageUpload: (files: FileList | null) => void;
   removeImage: (index: number) => void;

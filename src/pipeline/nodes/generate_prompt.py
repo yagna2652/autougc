@@ -15,8 +15,6 @@ import re
 import time
 from typing import Any
 
-from openai import OpenAI
-
 from src.pipeline.utils import (
     get_openrouter_client,
     handle_unexpected_error,
@@ -135,6 +133,7 @@ def generate_prompt_node(state: dict[str, Any]) -> dict[str, Any]:
     product_description = state.get("product_description", "")
     product_mechanics = state.get("product_mechanics", "")
     product_images = state.get("product_images", [])
+    config = state.get("config", {})
 
     if not video_analysis:
         logger.warning("No video analysis provided")
@@ -165,7 +164,8 @@ def generate_prompt_node(state: dict[str, Any]) -> dict[str, Any]:
         # Build the prompt generation request
         content = _build_prompt_request_openrouter(
             video_analysis, product_description, product_mechanics,
-            product_images, library
+            product_images, library,
+            video_model=config.get("video_model", "sora"),
         )
 
         # Call OpenRouter
@@ -290,146 +290,13 @@ def generate_prompt_node(state: dict[str, Any]) -> dict[str, Any]:
         return handle_unexpected_error(e, _ERROR_DEFAULTS, context="prompt generation")
 
 
-def _build_prompt_request(
-    video_analysis: dict[str, Any],
-    product_description: str,
-    product_mechanics: str,
-    product_images: list[str],
-    library: dict[str, Any],
-) -> list[dict[str, Any]]:
-    """
-    Build the content for prompt generation request.
-
-    Provides the model with video analysis prose, product info, mechanics
-    constraints, and the full interaction library inventory so it can pick
-    clips, plan beats, and write a motion prompt in one pass.
-
-    Args:
-        video_analysis: Analysis from analyze_video node
-        product_description: User's product description
-        product_mechanics: Prose describing physical interaction rules
-        product_images: List of product image URLs or base64
-        library: Loaded interaction library dict
-
-    Returns:
-        Content array for Claude API
-    """
-    content = []
-
-    # Format the video analysis
-    analysis_text = _format_analysis(video_analysis)
-
-    # Format interaction library inventory
-    library_text = _format_library(library)
-
-    # Build the main prompt
-    prompt = f"""You are an expert at creating MOTION prompts for AI image-to-video models.
-
-IMPORTANT: The video model will start with the actual product image as the first frame.
-Your prompt should describe HOW THINGS MOVE, not what the product looks like.
-
-## TIKTOK STYLE ANALYSIS
-I analyzed a TikTok video. Replicate this style:
-
-{analysis_text}
-
-## PRODUCT INFO
-**Product**: {product_description if product_description else "A product shown in the starting image."}
-
-## MECHANICS RULES
-{product_mechanics if product_mechanics else "No specific mechanics rules provided."}
-
-These rules describe the physical reality of the product — how it's held, what moves,
-what stays still, how big it is relative to hands. Your motion prompt MUST obey these
-rules. If the rules say "only one finger presses at a time", do not show two fingers
-pressing simultaneously. If the rules say "4 keys in a row", do not show 6 keys.
-
-## PHYSICS CONSTRAINTS (MANDATORY IN video_prompt)
-- Describe the hand wrapped around the device (which fingers move, which parts stay still).
-- Describe the keys physically moving: plunging downward, sinking into the housing, springing back up.
-- Use the exact verbs and energy from the MECHANICS RULES — do not substitute with generic words.
-- Include at least 3 "DO NOT" constraints taken directly from the mechanics.
-- Never describe the motion as typing, entering data, or using a utility device.
-
-{library_text}
-
-## YOUR TASK
-Using the TikTok style, mechanics rules, and interaction library above:
-
-1. **Pick 1-3 clips** from the library that fit the TikTok's energy and style
-2. **Plan the beats** — a short choreographed sequence (total ≤ 12 seconds)
-3. **Write a motion prompt** describing how the scene animates from the product image
-4. **Write a casual script** (1-3 sentences) adapted for this product
-
-KEEP from TikTok:
-- Person appearance/vibe (age, clothing, energy)
-- Setting/background
-- Lighting style
-- Camera movement (handheld, angle)
-- Pacing and energy level
-- Authenticity/UGC feel
-
-FOCUS ON MOTION (the product image is already visible):
-- Energy and dynamics: this is a fidget toy — force the motion to be playful, bouncy, repetitive, or absentminded (e.g., "idly drumming," "satisfying bouncy squeeze")
-- Point of contact: explicitly state where fingers press (the FLAT TOP SURFACE of the keycaps)
-- Key physics: you MUST describe the keys physically moving — use "plunges downward," "sinks into the housing," "springs back up"
-- Camera motion per beat (push in, pull back, slight pan)
-- DO NOT describe the product's appearance (colors, materials, shape)
-
-CRITICAL REQUIREMENTS:
-1. Starting frame shows the product — describe how it MOVES from there
-2. Follow the MECHANICS RULES exactly — do not invent impossible movements
-3. Reference specific clip IDs you chose from the library
-4. Focus on hand movements, camera motion, energy
-5. The product is already visible — don't describe its appearance
-6. Motion verbs: squeeze, plunge, crunch, bounce, drum, spring, sink, press
-7. iPhone front-facing camera look, NOT cinematic
-8. Real skin with texture, natural imperfections — NOT airbrushed
-9. Slight handheld shake, natural micro-movements — NOT robotic
-10. Natural indoor lighting — NOT studio lighting
-11. Looking at phone screen (like filming themselves)
-12. Open the prompt by stating the device is held VERTICALLY with the chain dangling at the bottom
-13. Explicitly state what remains stationary in each beat
-14. Add a clear "DO NOT SHOW" section inside the video prompt
-
-Respond in JSON format:
-{{
-    "video_prompt": "A visual, cinematic scene description — NOT a technical manual. Open with orientation (VERTICALLY held, chain dangling). Then describe each beat as a vivid motion scene: what the fingers do, how the keys plunge and spring, the energy and rhythm. End with a DO NOT SHOW section. Use the same verbs as the mechanics rules.",
-    "negative_prompt": "A semicolon-separated list of explicit forbidden motions from mechanics and physics constraints.",
-    "script": "A short casual script (1-3 sentences) adapted for the new product — written how a real person talks on TikTok",
-    "scene_description": "A photorealistic image generation prompt for the FIRST FRAME of the video. Describe: the person (age, appearance, clothing from TikTok analysis), the setting/background, the lighting, the product being held or interacted with (name it explicitly), camera angle and framing, UGC/iPhone selfie aesthetic. This will be fed to an image generation model to create the starting frame, so be vivid and specific. Example: 'A young woman in her early 20s with long brown hair wearing a casual oversized hoodie, sitting at a desk in a cozy bedroom with warm natural window lighting, holding a small mechanical keyboard keychain in her right hand, close-up shot from slightly above, iPhone selfie camera style, authentic and unpolished feel'"
-}}
-
-Return ONLY valid JSON."""
-
-    content.append({"type": "text", "text": prompt})
-
-    # Send product image so Claude can see what it's writing motion prompts for
-    if product_images:
-        image_data, media_type = process_image(product_images[0], auto_resize=True)
-        if image_data:
-            content.append({"type": "text", "text": "\n## PRODUCT IMAGE (for reference)"})
-            content.append({
-                "type": "image",
-                "source": {
-                    "type": "base64",
-                    "media_type": media_type,
-                    "data": image_data,
-                },
-            })
-            logger.info("Added product image to prompt generation request")
-        else:
-            logger.warning("Failed to process product image for prompt generation")
-
-    return content
-
-
 def _build_prompt_request_openrouter(
     video_analysis: dict[str, Any],
     product_description: str,
     product_mechanics: str,
     product_images: list[str],
     library: dict[str, Any],
+    video_model: str = "sora",
 ) -> list[dict[str, Any]]:
     """
     Build the content for prompt generation request (OpenRouter format).
@@ -440,6 +307,7 @@ def _build_prompt_request_openrouter(
         product_mechanics: Prose describing physical interaction rules
         product_images: List of product image URLs or base64
         library: Loaded interaction library dict
+        video_model: Target video model (affects prompt instructions)
 
     Returns:
         Content array for OpenRouter API (OpenAI-compatible format)
@@ -533,6 +401,19 @@ Respond in JSON format:
 Return ONLY valid JSON."""
 
     content.append({"type": "text", "text": prompt})
+
+    # O3 reference-to-video: instruct LLM to use @Element1 notation
+    if video_model == "kling-o3-ref":
+        content.append({"type": "text", "text": """
+## @Element1 REFERENCE NOTATION (CRITICAL — O3 model)
+The target video model uses reference-conditioned generation. When referring to the product in the video_prompt, use `@Element1` as an inline token so the model binds the product's identity element.
+
+Rules:
+- Use `@Element1` where you would normally name the product (e.g., "A hand picks up @Element1 and presses…")
+- You may use `@Element1` multiple times in the prompt
+- Do NOT wrap it in quotes or brackets — just `@Element1` bare
+- The model will replace `@Element1` with the actual product reference at render time
+"""})
 
     # Send product image in OpenRouter format
     if product_images:

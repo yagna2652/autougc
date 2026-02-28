@@ -2,7 +2,7 @@
 
 import { useState, useRef, useCallback } from "react";
 import { NODE_DEFINITIONS, NODE_IDS } from "@/lib/nodes";
-import type { RunHistoryEntry } from "@/types/pipeline";
+import type { RunHistoryEntry, VideoModel } from "@/types/pipeline";
 
 export type NodeStatus = "idle" | "running" | "done" | "failed";
 
@@ -20,9 +20,10 @@ function makeInitialNodeStates(): Record<string, NodeState> {
 }
 
 export interface PipelineCallbacks {
-  onRunStart?: (info: { videoUrl: string; videoModel: "sora" | "kling" | "kling-v3" }) => string | void;
+  onRunStart?: (info: { videoUrl: string; videoModel: VideoModel }) => string | void;
   onJobIdAssigned?: (runId: string, jobId: string) => void;
   onNodeUpdate?: (runId: string, nodeStates: Record<string, NodeState>) => void;
+  onPaused?: (runId: string) => void;
   onRunComplete?: (runId: string, status: "completed" | "failed", error: string | null) => void;
 }
 
@@ -34,7 +35,7 @@ export function usePipeline(callbacks?: PipelineCallbacks) {
   const [jobId, setJobId] = useState<string | null>(null);
   const [selectedNode, setSelectedNode] = useState<string | null>("input");
   const [videoUrl, setVideoUrl] = useState("");
-  const [videoModel, setVideoModel] = useState<"sora" | "kling" | "kling-v3">("sora");
+  const [videoModel, setVideoModel] = useState<VideoModel>("sora");
   const [productImages, setProductImages] = useState<string[]>([]);
   const [identityPack, setIdentityPack] = useState<Record<string, string>>({});
   const [useIdentityPack, setUseIdentityPack] = useState(false);
@@ -63,6 +64,118 @@ export function usePipeline(callbacks?: PipelineCallbacks) {
     }
   }, []);
 
+  // ---------------------------------------------------------------------------
+  // checkJobStatus — asks backend if a job is still alive
+  // ---------------------------------------------------------------------------
+  const checkJobStatus = useCallback(async (targetJobId: string): Promise<boolean> => {
+    try {
+      const response = await fetch("/api/pipeline", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "status", jobId: targetJobId }),
+      });
+      if (!response.ok) return false;
+      const data = await response.json();
+      const status = data.status as string;
+      return status === "running" || status === "paused";
+    } catch {
+      return false;
+    }
+  }, []);
+
+  // ---------------------------------------------------------------------------
+  // connectSSE — opens an EventSource for a given jobId and wires all handlers
+  // ---------------------------------------------------------------------------
+  const connectSSE = useCallback((targetJobId: string) => {
+    // Close any existing SSE connection
+    if (eventSourceRef.current) {
+      eventSourceRef.current.close();
+      eventSourceRef.current = null;
+    }
+
+    const es = new EventSource(`/api/pipeline?jobId=${targetJobId}`);
+    eventSourceRef.current = es;
+
+    es.onmessage = (e: MessageEvent) => {
+      let event: Record<string, unknown>;
+      try {
+        event = JSON.parse(e.data as string);
+      } catch {
+        return;
+      }
+
+      const eventType = event.type as string;
+
+      if (eventType === "node_start") {
+        const node = event.node as string;
+        setNodeStates((prev) => ({
+          ...prev,
+          [node]: { status: "running", output: null },
+        }));
+        setSelectedNode(node);
+      } else if (eventType === "node_done") {
+        const node = event.node as string;
+        const output = (event.output as Record<string, unknown>) ?? null;
+        setNodeStates((prev) => {
+          const next = {
+            ...prev,
+            [node]: { status: "done" as const, output },
+          };
+          // Fire onNodeUpdate callback with latest state
+          if (activeRunIdRef.current) {
+            callbacksRef.current?.onNodeUpdate?.(activeRunIdRef.current, next);
+          }
+          return next;
+        });
+        setSelectedNode(node);
+      } else if (eventType === "paused") {
+        setPipelineStatus("paused");
+        setSelectedNode("validate_prompt");
+        if (activeRunIdRef.current) {
+          callbacksRef.current?.onPaused?.(activeRunIdRef.current);
+        }
+        // Do NOT close EventSource — resume will push more events
+      } else if (eventType === "done") {
+        const status = event.status as string;
+        const finalStatus = status === "completed" ? "completed" : "failed";
+        setPipelineStatus(finalStatus);
+        const finalError = event.error ? (event.error as string) : null;
+        if (finalError) setError(finalError);
+
+        if (activeRunIdRef.current) {
+          callbacksRef.current?.onRunComplete?.(activeRunIdRef.current, finalStatus as "completed" | "failed", finalError);
+        }
+
+        es.close();
+        eventSourceRef.current = null;
+      }
+      // ping events are intentionally ignored
+    };
+
+    es.onerror = async () => {
+      if (es.readyState === EventSource.CLOSED) return;
+      es.close();
+      eventSourceRef.current = null;
+
+      // Check if the backend job is still alive before marking as failed
+      const alive = await checkJobStatus(targetJobId);
+      if (alive) {
+        // Backend is still running — try reconnecting once
+        connectSSE(targetJobId);
+        return;
+      }
+
+      setError("SSE connection lost");
+      setPipelineStatus("failed");
+      if (activeRunIdRef.current) {
+        callbacksRef.current?.onRunComplete?.(activeRunIdRef.current, "failed", "SSE connection lost");
+      }
+    };
+  }, [checkJobStatus]);
+
+  // ---------------------------------------------------------------------------
+  // startPipeline — kicks off a new run
+  // ---------------------------------------------------------------------------
   const startPipeline = useCallback(async () => {
     if (!videoUrl.trim()) return;
     if (pipelineStatus === "running") return;
@@ -110,89 +223,17 @@ export function usePipeline(callbacks?: PipelineCallbacks) {
         callbacksRef.current?.onJobIdAssigned?.(activeRunIdRef.current, newJobId);
       }
 
-      // Open SSE connection via the Next.js proxy
-      const es = new EventSource(`/api/pipeline?jobId=${newJobId}`);
-      eventSourceRef.current = es;
-
-      es.onmessage = (e: MessageEvent) => {
-        let event: Record<string, unknown>;
-        try {
-          event = JSON.parse(e.data as string);
-        } catch {
-          return;
-        }
-
-        const eventType = event.type as string;
-
-        if (eventType === "node_start") {
-          const node = event.node as string;
-          setNodeStates((prev) => ({
-            ...prev,
-            [node]: { status: "running", output: null },
-          }));
-          setSelectedNode(node);
-        } else if (eventType === "node_done") {
-          const node = event.node as string;
-          const output = (event.output as Record<string, unknown>) ?? null;
-          setNodeStates((prev) => {
-            const next = {
-              ...prev,
-              [node]: { status: "done" as const, output },
-            };
-            // Fire onNodeUpdate callback with latest state
-            if (activeRunIdRef.current) {
-              callbacksRef.current?.onNodeUpdate?.(activeRunIdRef.current, next);
-            }
-            return next;
-          });
-          setSelectedNode(node);
-        } else if (eventType === "paused") {
-          setPipelineStatus("paused");
-          setSelectedNode("validate_prompt");
-          // Do NOT close EventSource — resume will push more events
-        } else if (eventType === "done") {
-          const status = event.status as string;
-          const finalStatus = status === "completed" ? "completed" : "failed";
-          setPipelineStatus(finalStatus);
-          const finalError = event.error ? (event.error as string) : null;
-          if (finalError) setError(finalError);
-
-          // Fire onRunComplete callback
-          if (activeRunIdRef.current) {
-            callbacksRef.current?.onRunComplete?.(activeRunIdRef.current, finalStatus as "completed" | "failed", finalError);
-          }
-
-          es.close();
-          eventSourceRef.current = null;
-        }
-        // ping events are intentionally ignored
-      };
-
-      es.onerror = () => {
-        // EventSource readyState: 0=CONNECTING, 1=OPEN, 2=CLOSED
-        if (es.readyState === EventSource.CLOSED) return;
-        setError("SSE connection lost");
-        setPipelineStatus("failed");
-
-        // Fire onRunComplete on SSE error
-        if (activeRunIdRef.current) {
-          callbacksRef.current?.onRunComplete?.(activeRunIdRef.current, "failed", "SSE connection lost");
-        }
-
-        es.close();
-        eventSourceRef.current = null;
-      };
+      connectSSE(newJobId);
     } catch (err) {
       const errMsg = err instanceof Error ? err.message : "Unknown error";
       setError(errMsg);
       setPipelineStatus("failed");
 
-      // Fire onRunComplete on fetch error
       if (activeRunIdRef.current) {
         callbacksRef.current?.onRunComplete?.(activeRunIdRef.current, "failed", errMsg);
       }
     }
-  }, [videoUrl, videoModel, productImages, identityPack, useIdentityPack, useTailImage, pipelineStatus, falKey]);
+  }, [videoUrl, videoModel, productImages, identityPack, useIdentityPack, useTailImage, pipelineStatus, falKey, connectSSE]);
 
   const resumePipeline = useCallback(async (editedPrompt?: string) => {
     if (pipelineStatus !== "paused" || !jobId) return;
@@ -280,7 +321,7 @@ export function usePipeline(callbacks?: PipelineCallbacks) {
 
   const toggleIdentityPack = useCallback((enabled: boolean) => {
     setUseIdentityPack(enabled);
-    if (enabled) setVideoModel("kling-v3");
+    if (enabled) setVideoModel(prev => prev === "kling-v3" || prev === "kling-o3-ref" ? prev : "kling-v3");
   }, []);
 
   const restoreRun = useCallback((entry: RunHistoryEntry) => {
@@ -310,6 +351,54 @@ export function usePipeline(callbacks?: PipelineCallbacks) {
     setSelectedNode(lastDone ?? "input");
   }, []);
 
+  // ---------------------------------------------------------------------------
+  // reconnectToJob — restore state from history snapshot then open SSE
+  // ---------------------------------------------------------------------------
+  const reconnectToJob = useCallback(async (entry: RunHistoryEntry) => {
+    if (!entry.jobId) return;
+
+    // Close any existing SSE connection
+    if (eventSourceRef.current) {
+      eventSourceRef.current.close();
+      eventSourceRef.current = null;
+    }
+
+    // Restore state from history snapshot
+    setNodeStates(
+      Object.keys(entry.nodeStates).length > 0
+        ? (entry.nodeStates as Record<string, NodeState>)
+        : makeInitialNodeStates()
+    );
+    setPipelineStatus(entry.status as PipelineStatus);
+    setJobId(entry.jobId);
+    setVideoUrl(entry.videoUrl);
+    setVideoModel(entry.videoModel);
+    setError(entry.error);
+
+    // Route callbacks to existing history entry (no onRunStart call)
+    activeRunIdRef.current = entry.id;
+
+    // Auto-select last completed node
+    const lastDone = [...NODE_IDS].reverse().find(
+      (nid) => entry.nodeStates[nid]?.status === "done"
+    );
+    setSelectedNode(lastDone ?? "input");
+
+    // Verify backend still has this job
+    const alive = await checkJobStatus(entry.jobId);
+    if (!alive) {
+      setError("Backend connection lost");
+      setPipelineStatus("failed");
+      if (activeRunIdRef.current) {
+        callbacksRef.current?.onRunComplete?.(activeRunIdRef.current, "failed", "Backend connection lost");
+      }
+      return;
+    }
+
+    // Open SSE for live updates (backend replays all events from cursor=0)
+    connectSSE(entry.jobId);
+  }, [checkJobStatus, connectSSE]);
+
   return {
     nodeStates,
     pipelineStatus,
@@ -337,6 +426,7 @@ export function usePipeline(callbacks?: PipelineCallbacks) {
     resumePipeline,
     resetPipeline,
     restoreRun,
+    reconnectToJob,
     activeRunId: activeRunIdRef.current,
   };
 }

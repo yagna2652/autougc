@@ -26,6 +26,7 @@ MODEL_ENDPOINTS = {
     "sora": "fal-ai/sora-2/image-to-video/pro",
     "kling": "fal-ai/kling-video/v2.1/pro/image-to-video",
     "kling-v3": "fal-ai/kling-video/v3/pro/image-to-video",
+    "kling-o3-ref": "fal-ai/kling-video/o3/standard/reference-to-video",
 }
 
 # Approximate pricing per second (USD) for I2V
@@ -166,36 +167,69 @@ def generate_video_node(state: dict[str, Any]) -> dict[str, Any]:
                 f"Adjusted duration to {video_duration}s for Sora 2 (valid: 4, 8, 12)"
             )
 
+    # O3 ref-to-video accepts duration 3-15 (int)
+    is_o3_model = video_model == "kling-o3-ref"
+    if is_o3_model:
+        video_duration = max(3, min(15, video_duration))
+        logger.info(f"    ↳ O3 duration clamped to {video_duration}s (range 3-15)")
+
+    # O3 auto-enables tail image for start=end consistency
+    if is_o3_model and not use_tail_image:
+        use_tail_image = True
+        logger.info("    ↳ O3: auto-enabled tail image for start=end consistency")
+
     # Prepare tail image for consistency (use same as start frame)
     tail_image_url = None
     if use_tail_image:
         tail_image_url = i2v_image_url
         logger.info("    ↳ Using tail_image_url for end-frame consistency")
 
-    # Prepare identity pack images if enabled
+    # Prepare identity reference images for Kling V3 / O3
     identity_images = None
-    if use_identity_pack:
-        identity_pack = state.get("product_identity_pack", {})
-        if identity_pack:
-            selected_sources, selection_reasons = select_identity_references(
-                identity_pack=identity_pack,
-                video_analysis=state.get("video_analysis", {}),
-                scene_description=state.get("scene_description", ""),
-            )
-            identity_images = _normalize_identity_images(selected_sources, fal_key)
-            if identity_images:
-                logger.info(
-                    f"    ↳ Using identity pack with {len(identity_images)} reference images"
+    is_kling_v3_model = "kling-v3" in video_model
+    supports_elements = is_kling_v3_model or is_o3_model
+
+    if supports_elements:
+        if use_identity_pack:
+            # Path A: Smart selection from explicit identity pack
+            identity_pack = state.get("product_identity_pack", {})
+            if identity_pack:
+                selected_sources, selection_reasons = select_identity_references(
+                    identity_pack=identity_pack,
+                    video_analysis=state.get("video_analysis", {}),
+                    scene_description=state.get("scene_description", ""),
                 )
-                if selection_reasons:
+                identity_images = _normalize_identity_images(selected_sources, fal_key)
+                if identity_images:
                     logger.info(
-                        "    ↳ Selector reasons: "
-                        + ", ".join(selection_reasons[: len(identity_images)])
+                        f"    ↳ Identity pack (smart selection): {len(identity_images)} reference images"
                     )
-            else:
-                logger.warning(
-                    "    ↳ Identity pack enabled, but no valid references after normalization"
-                )
+                    if selection_reasons:
+                        logger.info(
+                            "    ↳ Selector reasons: "
+                            + ", ".join(selection_reasons[: len(identity_images)])
+                        )
+                else:
+                    logger.warning(
+                        "    ↳ Identity pack enabled, but no valid references after normalization"
+                    )
+        else:
+            # Path B: Build references from product_images (default path)
+            # Only when 2+ images — a single image is already the start frame
+            if len(product_images) >= 2:
+                identity_images = _normalize_identity_images(product_images, fal_key)
+                if identity_images:
+                    logger.info(f"    ↳ Auto-built identity from {len(identity_images)} product images")
+
+    # O3: if no identity_images but product_images exist, auto-build element from first product image
+    if is_o3_model and not identity_images and product_images:
+        if not scene_image_url and i2v_image_url:
+            # i2v_image_url was uploaded from the same product image — reuse it
+            identity_images = [i2v_image_url]
+        else:
+            identity_images = _normalize_identity_images(product_images[:1], fal_key)
+        if identity_images:
+            logger.info("    ↳ O3: auto-built element from first product image")
 
     # Sanitize prompt before first request to reduce moderation failures.
     safe_video_prompt = sanitize_video_prompt(video_prompt)
@@ -338,6 +372,15 @@ class FalApiError(Exception):
     pass
 
 
+def _build_elements_payload(identity_images: list[str]) -> dict[str, Any]:
+    """Build a single Kling elements entry from identity reference images."""
+    frontal = identity_images[0]
+    references = identity_images[1:5]
+    if not references:
+        references = [frontal]
+    return {"frontal_image_url": frontal, "reference_image_urls": references}
+
+
 def _call_fal_api(
     fal_key: str,
     endpoint: str,
@@ -381,9 +424,33 @@ def _call_fal_api(
     # Build API input based on model
     is_kling = "kling-video" in endpoint
     is_kling_v3 = "/v3/" in endpoint
+    is_o3_ref = "/o3/" in endpoint and "reference-to-video" in endpoint
 
     if "kling" in endpoint:
-        if is_kling_v3:
+        if is_o3_ref:
+            # O3 reference-to-video: duration as int (3-15), cfg_scale, elements always
+            api_input = {
+                "prompt": prompt,
+                "start_image_url": image_url,
+                "duration": duration,  # O3 takes int, not str
+                "aspect_ratio": aspect_ratio,
+                "cfg_scale": 0.5,
+                "generate_audio": False,
+            }
+            if tail_image_url:
+                api_input["end_image_url"] = tail_image_url
+                logger.info("    ↳ Added end_image_url for O3 ref-to-video")
+
+            if identity_images:
+                api_input["elements"] = [_build_elements_payload(identity_images)]
+                logger.info(
+                    "    ↳ Added O3 identity element "
+                    f"(frontal + {len(api_input['elements'][0]['reference_image_urls'])} reference image(s))"
+                )
+            else:
+                logger.warning("    ↳ O3 ref-to-video: no identity_images provided — elements will be empty")
+
+        elif is_kling_v3:
             api_input = {
                 "prompt": prompt,
                 "start_image_url": image_url,
@@ -397,22 +464,10 @@ def _call_fal_api(
 
             # Kling v3 elements require an image set with frontal + reference images.
             if identity_images:
-                # Keep payload small but valid. Provide 1 frontal + >=1 reference.
-                frontal = identity_images[0]
-                references = identity_images[1:2]
-                if not references:
-                    # Duplicate frontal so schema requirements are still met.
-                    references = [frontal]
-
-                api_input["elements"] = [
-                    {
-                        "frontal_image_url": frontal,
-                        "reference_image_urls": references,
-                    }
-                ]
+                api_input["elements"] = [_build_elements_payload(identity_images)]
                 logger.info(
                     "    ↳ Added Kling V3 identity element "
-                    f"(frontal + {len(references)} reference image(s))"
+                    f"(frontal + {len(api_input['elements'][0]['reference_image_urls'])} reference image(s))"
                 )
         else:
             api_input = {

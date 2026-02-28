@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useCallback, useEffect } from "react";
-import type { RunHistoryEntry, SerializedNodeState } from "@/types/pipeline";
+import type { RunHistoryEntry, SerializedNodeState, VideoModel } from "@/types/pipeline";
 
 const STORAGE_KEY = "autougc_run_history";
 const MAX_RUNS = 50;
@@ -51,7 +51,7 @@ export function useRunHistory() {
   }, [runs, isHydrated]);
 
   const createRun = useCallback(
-    ({ videoUrl, videoModel }: { videoUrl: string; videoModel: "sora" | "kling" | "kling-v3" }): string => {
+    ({ videoUrl, videoModel }: { videoUrl: string; videoModel: VideoModel }): string => {
       const id = generateId();
       const entry: RunHistoryEntry = {
         id,
@@ -99,5 +99,5 @@ export function useRunHistory() {
     [runs]
   );
 
-  return { runs, createRun, updateRun, deleteRun, clearAll, getRun };
+  return { runs, isHydrated, createRun, updateRun, deleteRun, clearAll, getRun };
 }

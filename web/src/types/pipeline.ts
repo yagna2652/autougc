@@ -40,6 +40,8 @@ export interface VideoAnalysisData {
 // Pipeline State and Result Types
 // =============================================================================
 
+export type VideoModel = "sora" | "kling" | "kling-v3" | "kling-o3-ref";
+
 export type PipelineStatus = "idle" | "running" | "paused" | "completed" | "failed";
 
 export type PipelineNodeId =
@@ -47,6 +49,7 @@ export type PipelineNodeId =
   | "extract_frames"
   | "analyze_video"
   | "generate_prompt"
+  | "distill_prompt"
   | "validate_prompt"
   | "generate_scene_image"
   | "generate_video";
@@ -77,7 +80,7 @@ export interface StartPipelineRequest {
   productDescription?: string;
   productMechanics?: string;
   productImages: string[];
-  videoModel?: "sora" | "kling" | "kling-v3";
+  videoModel?: VideoModel;
   productIdentityPack?: {
     front?: string;
     side_45?: string;
@@ -129,7 +132,7 @@ export interface RunHistoryEntry {
   id: string;
   jobId: string | null;
   videoUrl: string;
-  videoModel: "sora" | "kling" | "kling-v3";
+  videoModel: VideoModel;
   status: "running" | "paused" | "completed" | "failed";
   startedAt: number;
   updatedAt: number;
