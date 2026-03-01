@@ -1,39 +1,29 @@
 """
 FastAPI server for AutoUGC video generation.
 
-Simple API that exposes the UGC generation pipeline:
-- POST /api/v1/pipeline/start - Start a pipeline job
-- GET /api/v1/pipeline/jobs/{job_id} - Get job status
-- GET /api/v1/pipeline/health - Health check
+POST /api/v1/generate — O3 reference-to-video (SSE stream)
 """
 
 from dotenv import load_dotenv
 
-load_dotenv()  # Load environment variables from .env
+load_dotenv()
 
 import logging
 import sys
 
-# Configure logging to show INFO level with timestamps
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s | %(levelname)-8s | %(name)s | %(message)s",
     datefmt="%H:%M:%S",
     handlers=[logging.StreamHandler(sys.stdout)],
-    force=True,  # Override any existing config
+    force=True,
 )
 
-# Set specific loggers to INFO level
 for logger_name in ["src.pipeline", "api", "uvicorn"]:
     logging.getLogger(logger_name).setLevel(logging.INFO)
 
-# Suppress noisy httpx polling logs (Fal.ai queue status checks)
 logging.getLogger("httpx").setLevel(logging.WARNING)
 logging.getLogger("httpcore").setLevel(logging.WARNING)
-
-# Configure LangSmith to strip large base64 data from traces
-from src.tracing import configure_langsmith_filtering
-configure_langsmith_filtering()
 
 import uvicorn
 from fastapi import FastAPI
@@ -41,11 +31,10 @@ from fastapi.middleware.cors import CORSMiddleware
 
 app = FastAPI(
     title="AutoUGC API",
-    description="Simple UGC video generation from TikTok analysis",
-    version="2.0.0",
+    description="O3 reference-to-video generation",
+    version="3.0.0",
 )
 
-# CORS configuration for Next.js dev server
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
@@ -60,35 +49,24 @@ app.add_middleware(
 
 @app.get("/health")
 async def health_check():
-    """Health check endpoint."""
-    return {
-        "status": "ok",
-        "service": "AutoUGC API",
-        "version": "2.0.0",
-    }
+    return {"status": "ok", "service": "AutoUGC API", "version": "3.0.0"}
 
 
 @app.get("/")
 async def root():
-    """Root endpoint with API information."""
     return {
         "service": "AutoUGC API",
-        "version": "2.0.0",
+        "version": "3.0.0",
         "endpoints": {
             "health": "/health",
-            "pipeline_start": "POST /api/v1/pipeline/start",
-            "pipeline_job_status": "GET /api/v1/pipeline/jobs/{job_id}",
-            "pipeline_health": "GET /api/v1/pipeline/health",
+            "generate": "POST /api/v1/generate",
         },
     }
 
 
-# Import and include routers
-from api.routes.pipeline import router as pipeline_router
-from api.routes.prompts import router as prompts_router
+from api.routes.generate import router as generate_router
 
-app.include_router(pipeline_router, prefix="/api/v1", tags=["pipeline"])
-app.include_router(prompts_router, prefix="/api/v1", tags=["prompts"])
+app.include_router(generate_router, prefix="/api/v1", tags=["generate"])
 
 
 if __name__ == "__main__":

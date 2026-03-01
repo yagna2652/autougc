@@ -1,5 +1,5 @@
-import { PipelineApp } from "@/components/pipeline-app";
+import { GenerateForm } from "@/components/generate-form";
 
 export default function Home() {
-  return <PipelineApp />;
+  return <GenerateForm />;
 }
