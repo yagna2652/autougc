@@ -14,7 +14,7 @@ from typing import Any
 
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 from src.pipeline.utils.fal_upload import upload_image_to_fal
 
@@ -28,8 +28,15 @@ O3_ENDPOINT = "fal-ai/kling-video/o3/standard/reference-to-video"
 # ---------- Request / Response models ----------
 
 
+class ShotPrompt(BaseModel):
+    prompt: str = Field(..., min_length=1, max_length=512)
+    duration: int = Field(default=5, ge=3, le=15)
+
+
 class GenerateRequest(BaseModel):
-    prompt: str = Field(..., min_length=1, description="Video prompt (use @Element1 to reference product)")
+    prompt: str = Field(default="", description="Single-shot prompt (use @Element1 to reference product)")
+    multi_prompt: list[ShotPrompt] | None = Field(default=None, description="Multi-shot prompts (mutually exclusive with prompt)")
+    shot_type: str = Field(default="customize", description="Shot type when using multi_prompt")
     start_image_url: str = Field(..., min_length=1, description="URL of the starting frame image")
     product_images: list[str] = Field(default_factory=list, description="Product reference images for identity element")
     duration: int = Field(default=5, ge=3, le=15, description="Video duration in seconds (3-15)")
@@ -38,6 +45,16 @@ class GenerateRequest(BaseModel):
     end_image_url: str | None = Field(default=None, description="Optional end frame (defaults to start_image)")
     negative_prompt: str = Field(default="blur, distort, and low quality", description="What to avoid in the video")
     product_video_url: str | None = Field(default=None, description="Motion reference video for the product element")
+
+    @model_validator(mode="after")
+    def check_prompt_or_multi_prompt(self):
+        has_prompt = bool(self.prompt and self.prompt.strip())
+        has_multi = bool(self.multi_prompt and len(self.multi_prompt) > 0)
+        if not has_prompt and not has_multi:
+            raise ValueError("Either prompt or multi_prompt must be provided")
+        if has_prompt and has_multi:
+            raise ValueError("prompt and multi_prompt are mutually exclusive")
+        return self
 
 
 # ---------- Helpers ----------
@@ -68,7 +85,7 @@ def _build_elements(
         urls.append(uploaded)
 
     frontal = urls[0]
-    references = urls[1:5] if len(urls) > 1 else [frontal]
+    references = urls[1:4] if len(urls) > 1 else [frontal]
 
     element: dict[str, Any] = {"frontal_image_url": frontal, "reference_image_urls": references}
     if video_url:
@@ -87,6 +104,8 @@ def _call_fal_o3(
     end_image_url: str | None,
     elements: list[dict[str, Any]] | None,
     negative_prompt: str | None = None,
+    multi_prompt: list[dict[str, Any]] | None = None,
+    shot_type: str = "customize",
 ) -> dict[str, Any]:
     """Call Fal O3 reference-to-video API (blocking)."""
     import fal_client
@@ -94,15 +113,20 @@ def _call_fal_o3(
     os.environ["FAL_KEY"] = fal_key
 
     api_input: dict[str, Any] = {
-        "prompt": prompt,
         "start_image_url": start_image_url,
-        "duration": duration,
         "aspect_ratio": aspect_ratio,
         "cfg_scale": cfg_scale,
         "generate_audio": False,
     }
 
-    if end_image_url:
+    if multi_prompt:
+        api_input["multi_prompt"] = multi_prompt
+        api_input["shot_type"] = shot_type
+    else:
+        api_input["prompt"] = prompt
+        api_input["duration"] = duration
+
+    if end_image_url and not multi_prompt:
         api_input["end_image_url"] = end_image_url
 
     if negative_prompt:
@@ -111,8 +135,12 @@ def _call_fal_o3(
     if elements:
         api_input["elements"] = elements
 
-    logger.info(f"Calling Fal O3: duration={duration}s, aspect={aspect_ratio}")
-    logger.info(f"Prompt: {prompt[:100]}...")
+    if multi_prompt:
+        total_dur = sum(int(s["duration"]) for s in multi_prompt)
+        logger.info(f"Calling Fal O3 multi-shot: {len(multi_prompt)} shots, {total_dur}s total, aspect={aspect_ratio}")
+    else:
+        logger.info(f"Calling Fal O3: duration={duration}s, aspect={aspect_ratio}")
+        logger.info(f"Prompt: {prompt[:100]}...")
 
     result = fal_client.subscribe(
         O3_ENDPOINT,
@@ -132,11 +160,60 @@ def _call_fal_o3(
 async def _generate_stream(req: GenerateRequest):
     """Run generation in a thread and yield SSE events."""
     job_id = str(uuid.uuid4())[:8]
+    trace_id = None
+    prompt_version_id = None
 
     def sse(event: str, data: dict) -> str:
         return f"event: {event}\ndata: {json.dumps(data)}\n\n"
 
-    yield sse("job_start", {"job_id": job_id})
+    # Auto-save prompt version + create trace
+    from api.routes.prompts import store as prompt_store
+
+    def fail_trace(msg: str):
+        if prompt_store and trace_id:
+            try:
+                prompt_store.update_trace(trace_id, status="error", error_message=msg)
+            except Exception:
+                pass
+
+    # Build stored prompt text + model_config for versioning
+    if req.multi_prompt:
+        stored_prompt = "\n---\n".join(s.prompt for s in req.multi_prompt)
+        model_config = {
+            "aspect_ratio": req.aspect_ratio,
+            "cfg_scale": req.cfg_scale,
+            "multi_prompt": [{"prompt": s.prompt, "duration": s.duration} for s in req.multi_prompt],
+            "shot_type": req.shot_type,
+        }
+    else:
+        stored_prompt = req.prompt
+        model_config = {"duration": req.duration, "aspect_ratio": req.aspect_ratio, "cfg_scale": req.cfg_scale}
+
+    if prompt_store:
+        try:
+            version = prompt_store.save_version(
+                prompt=stored_prompt,
+                negative_prompt=req.negative_prompt or "",
+                model_config=model_config,
+            )
+            prompt_version_id = version["id"]
+            trace_id = prompt_store.save_trace(
+                prompt_version_id=prompt_version_id,
+                job_id=job_id,
+                start_image_url=req.start_image_url,
+                end_image_url=req.end_image_url,
+                product_images=req.product_images or None,
+                product_video_url=req.product_video_url,
+                status="pending",
+            )
+        except Exception as e:
+            logger.warning(f"Failed to save prompt version/trace: {e}")
+
+    yield sse("job_start", {
+        "job_id": job_id,
+        "prompt_version_id": prompt_version_id,
+        "trace_id": trace_id,
+    })
 
     fal_key = os.getenv("FAL_KEY")
     if not fal_key:
@@ -146,16 +223,23 @@ async def _generate_stream(req: GenerateRequest):
     # Upload start image
     yield sse("status", {"step": "uploading", "message": "Uploading images..."})
     try:
-        start_url = await asyncio.to_thread(_upload_if_needed, req.start_image_url, fal_key)
-        end_url = None
-        if req.end_image_url:
-            end_url = await asyncio.to_thread(_upload_if_needed, req.end_image_url, fal_key)
-        else:
-            end_url = start_url  # Loop anchor: end = start
-        product_vid_url = None
+        # Upload independent assets in parallel
+        uploads = [asyncio.to_thread(_upload_if_needed, req.start_image_url, fal_key)]
+        need_end = not req.multi_prompt and req.end_image_url
+        if need_end:
+            uploads.append(asyncio.to_thread(_upload_if_needed, req.end_image_url, fal_key))
         if req.product_video_url:
-            product_vid_url = await asyncio.to_thread(_upload_if_needed, req.product_video_url, fal_key)
+            uploads.append(asyncio.to_thread(_upload_if_needed, req.product_video_url, fal_key))
+
+        results = await asyncio.gather(*uploads)
+        idx = 0
+        start_url = results[idx]; idx += 1
+        end_url = results[idx] if need_end else (None if req.multi_prompt else start_url)
+        if need_end:
+            idx += 1
+        product_vid_url = results[idx] if req.product_video_url else None
     except Exception as e:
+        fail_trace(f"Image upload failed: {e}")
         yield sse("error", {"message": f"Image upload failed: {e}"})
         return
 
@@ -168,6 +252,7 @@ async def _generate_stream(req: GenerateRequest):
                 _build_elements, req.product_images, fal_key, video_url=product_vid_url,
             )
         except Exception as e:
+            fail_trace(f"Element preparation failed: {e}")
             yield sse("error", {"message": f"Element preparation failed: {e}"})
             return
 
@@ -176,6 +261,11 @@ async def _generate_stream(req: GenerateRequest):
     start_time = time.time()
 
     try:
+        multi_prompt_dicts = (
+            [{"prompt": s.prompt, "duration": str(s.duration)} for s in req.multi_prompt]
+            if req.multi_prompt
+            else None
+        )
         result = await asyncio.to_thread(
             _call_fal_o3,
             fal_key=fal_key,
@@ -187,8 +277,11 @@ async def _generate_stream(req: GenerateRequest):
             end_image_url=end_url,
             elements=elements,
             negative_prompt=req.negative_prompt,
+            multi_prompt=multi_prompt_dicts,
+            shot_type=req.shot_type,
         )
     except Exception as e:
+        fail_trace(str(e))
         yield sse("error", {"message": f"Video generation failed: {e}"})
         return
 
@@ -196,13 +289,22 @@ async def _generate_stream(req: GenerateRequest):
     video_url = result.get("video", {}).get("url", "")
 
     if not video_url:
+        fail_trace("No video URL returned")
         yield sse("error", {"message": "Generation succeeded but no video URL returned"})
         return
+
+    if prompt_store and trace_id:
+        try:
+            prompt_store.update_trace(trace_id, video_url=video_url, elapsed_seconds=elapsed, status="success")
+        except Exception:
+            pass
 
     yield sse("done", {
         "video_url": video_url,
         "elapsed_seconds": elapsed,
         "job_id": job_id,
+        "prompt_version_id": prompt_version_id,
+        "trace_id": trace_id,
     })
 
 

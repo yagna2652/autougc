@@ -11,6 +11,8 @@ interface GenerateState {
   videoUrl: string | null;
   elapsed: number | null;
   jobId: string | null;
+  promptVersionId: string | null;
+  traceId: string | null;
 }
 
 export function useGenerate() {
@@ -20,6 +22,8 @@ export function useGenerate() {
     videoUrl: null,
     elapsed: null,
     jobId: null,
+    promptVersionId: null,
+    traceId: null,
   });
   const abortRef = useRef<AbortController | null>(null);
 
@@ -29,7 +33,7 @@ export function useGenerate() {
     const controller = new AbortController();
     abortRef.current = controller;
 
-    setState({ status: "uploading", message: "Starting...", videoUrl: null, elapsed: null, jobId: null });
+    setState({ status: "uploading", message: "Starting...", videoUrl: null, elapsed: null, jobId: null, promptVersionId: null, traceId: null });
 
     try {
       const res = await fetch("/api/generate", {
@@ -67,7 +71,12 @@ export function useGenerate() {
 
               switch (event.event) {
                 case "job_start":
-                  setState((s) => ({ ...s, jobId: event.data.job_id }));
+                  setState((s) => ({
+                    ...s,
+                    jobId: event.data.job_id,
+                    promptVersionId: event.data.prompt_version_id ?? null,
+                    traceId: event.data.trace_id ?? null,
+                  }));
                   break;
                 case "status":
                   setState((s) => ({
@@ -83,6 +92,8 @@ export function useGenerate() {
                     videoUrl: event.data.video_url,
                     elapsed: event.data.elapsed_seconds,
                     jobId: event.data.job_id,
+                    promptVersionId: event.data.prompt_version_id ?? null,
+                    traceId: event.data.trace_id ?? null,
                   });
                   break;
                 case "error":
@@ -107,5 +118,27 @@ export function useGenerate() {
     setState((s) => ({ ...s, status: "idle", message: "Cancelled" }));
   }, []);
 
-  return { ...state, generate, cancel };
+  const updateTrace = useCallback(async (traceId: string, data: Record<string, unknown>) => {
+    try {
+      await fetch(`/api/traces/${traceId}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(data),
+      });
+    } catch {
+      // silent
+    }
+  }, []);
+
+  const rateGeneration = useCallback(
+    (traceId: string, rating: number) => updateTrace(traceId, { rating }),
+    [updateTrace],
+  );
+
+  const annotateGeneration = useCallback(
+    (traceId: string, notes: string) => updateTrace(traceId, { notes }),
+    [updateTrace],
+  );
+
+  return { ...state, generate, cancel, rateGeneration, annotateGeneration };
 }

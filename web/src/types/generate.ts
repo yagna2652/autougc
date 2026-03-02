@@ -1,6 +1,14 @@
+/** A single shot in a multi-shot prompt */
+export interface ShotPrompt {
+  prompt: string;
+  duration: number;
+}
+
 /** Request body for POST /api/generate */
 export interface GenerateRequest {
-  prompt: string;
+  prompt?: string;
+  multi_prompt?: ShotPrompt[];
+  shot_type?: string;
   start_image_url: string;
   product_images: string[];
   duration: number;
@@ -16,6 +24,8 @@ export type GenerateEventType = "job_start" | "status" | "done" | "error";
 
 export interface JobStartEvent {
   job_id: string;
+  prompt_version_id: string | null;
+  trace_id: string | null;
 }
 
 export interface StatusEvent {
@@ -27,6 +37,8 @@ export interface DoneEvent {
   video_url: string;
   elapsed_seconds: number;
   job_id: string;
+  prompt_version_id: string | null;
+  trace_id: string | null;
 }
 
 export interface ErrorEvent {

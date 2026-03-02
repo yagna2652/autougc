@@ -1,14 +1,35 @@
 "use client";
 
 import { FormEvent, useEffect, useRef, useState } from "react";
-import { Loader2, Play, X, Plus, Trash2, Video, Upload } from "lucide-react";
+import { Loader2, Play, X, Plus, Trash2, Video, Upload, Package, Save } from "lucide-react";
 import { useGenerate, type GenerateStatus } from "@/hooks/use-generate";
+import { usePrompts } from "@/hooks/use-prompts";
+import { PromptSidebar } from "@/components/prompt-sidebar";
+import { GenerationCard } from "@/components/generation-card";
 
 const ASPECT_OPTIONS = ["9:16", "16:9", "1:1"] as const;
 const DURATION_OPTIONS = [3, 5, 8, 10] as const;
+const SHOT_DURATION_OPTIONS = [3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15] as const;
+
+const PRESETS = {
+  keychain: {
+    label: "Keychain",
+    startImage: "/video-generation-frames/start_screen.png",
+    endImage: "/video-generation-frames/end_frame.png",
+    productImages: [
+      "/products/keychain/front.png",
+      "/products/keychain/side_45.png",
+      "/products/keychain/Horizontal.png",
+      "/products/keychain/top.png",
+      "/products/keychain/Sideview.png",
+    ],
+    productVideo: "",
+  },
+} as const;
 
 export function GenerateForm() {
-  const { status, message, videoUrl, elapsed, generate, cancel } = useGenerate();
+  const { status, message, videoUrl, elapsed, traceId, promptVersionId, generate, cancel, rateGeneration, annotateGeneration } = useGenerate();
+  const { versions, loading: versionsLoading, refresh: refreshVersions, loadVersion, saveVersion, setLabel, removeLabel } = usePrompts();
 
   const [prompt, setPrompt] = useState("");
   const [startImageUrl, setStartImageUrl] = useState("");
@@ -22,14 +43,85 @@ export function GenerateForm() {
   const [duration, setDuration] = useState(5);
   const [aspectRatio, setAspectRatio] = useState<string>("9:16");
   const [cfgScale, setCfgScale] = useState(0.5);
+  const [multiShotMode, setMultiShotMode] = useState(false);
+  const shotIdRef = useRef(1);
+  const [shots, setShots] = useState<{ id: number; prompt: string; duration: number }[]>([
+    { id: -2, prompt: "", duration: 5 },
+    { id: -1, prompt: "", duration: 5 },
+  ]);
+  const [activePreset, setActivePreset] = useState<string | null>(null);
+  const [activeVersionId, setActiveVersionId] = useState<string | null>(null);
+  const [activeVersionNum, setActiveVersionNum] = useState<number | null>(null);
+  const [saveFeedback, setSaveFeedback] = useState<string | null>(null);
 
   const isRunning = status !== "idle" && status !== "done" && status !== "error";
+
+  // Refresh version list when generation completes
+  useEffect(() => {
+    if (status === "done" && promptVersionId) {
+      refreshVersions();
+      setActiveVersionId(promptVersionId);
+    }
+  }, [status, promptVersionId, refreshVersions]);
+
+  function loadPreset(key: keyof typeof PRESETS) {
+    const p = PRESETS[key];
+    setStartImageUrl(p.startImage);
+    setEndImageUrl(p.endImage);
+    setProductImages(p.productImages.map((url, i) => ({ id: nextId.current++, url })));
+    setProductVideoUrl(p.productVideo);
+    setActivePreset(key);
+  }
+
+  async function handleSelectVersion(id: string) {
+    const version = await loadVersion(id);
+    if (version) {
+      setNegativePrompt(version.negative_prompt || "blur, distort, and low quality");
+      setActiveVersionId(version.id);
+      setActiveVersionNum(version.version);
+      if (version.model_config) {
+        if (version.model_config.duration) setDuration(version.model_config.duration);
+        if (version.model_config.aspect_ratio) setAspectRatio(version.model_config.aspect_ratio);
+        if (version.model_config.cfg_scale !== undefined) setCfgScale(version.model_config.cfg_scale);
+
+        // Restore multi-shot state if present
+        if (version.model_config.multi_prompt && version.model_config.multi_prompt.length > 0) {
+          setMultiShotMode(true);
+          setShots(version.model_config.multi_prompt.map((s) => ({
+            id: shotIdRef.current++,
+            prompt: s.prompt,
+            duration: s.duration,
+          })));
+          setPrompt("");
+        } else {
+          setMultiShotMode(false);
+          setPrompt(version.prompt);
+        }
+      } else {
+        setMultiShotMode(false);
+        setPrompt(version.prompt);
+      }
+    }
+  }
+
+  async function handleSavePrompt() {
+    const textToSave = multiShotMode
+      ? shots.map((s) => s.prompt).join("\n---\n")
+      : prompt;
+    if (!textToSave.trim()) return;
+    const result = await saveVersion(textToSave, negativePrompt);
+    if (result) {
+      setActiveVersionId(result.id);
+      setActiveVersionNum(result.version);
+      setSaveFeedback(result.is_new ? `Saved as v${result.version}` : `Already saved (v${result.version})`);
+      setTimeout(() => setSaveFeedback(null), 2000);
+    }
+  }
 
   function handleSubmit(e: FormEvent) {
     e.preventDefault();
     const images = productImages.map((p) => p.url).filter((u) => u.trim() !== "");
-    generate({
-      prompt,
+    const base = {
       start_image_url: startImageUrl,
       product_images: images,
       duration,
@@ -38,7 +130,17 @@ export function GenerateForm() {
       ...(endImageUrl.trim() && { end_image_url: endImageUrl.trim() }),
       ...(productVideoUrl.trim() && { product_video_url: productVideoUrl.trim() }),
       ...(negativePrompt.trim() && { negative_prompt: negativePrompt.trim() }),
-    });
+    };
+
+    if (multiShotMode) {
+      generate({
+        ...base,
+        multi_prompt: shots.map((s) => ({ prompt: s.prompt, duration: s.duration })),
+        shot_type: "customize",
+      });
+    } else {
+      generate({ ...base, prompt });
+    }
   }
 
   function addProductImage() {
@@ -53,15 +155,70 @@ export function GenerateForm() {
     setProductImages((prev) => prev.map((p) => (p.id === id ? { ...p, url: val } : p)));
   }
 
+  function addShot() {
+    setShots((prev) => [...prev, { id: shotIdRef.current++, prompt: "", duration: 5 }]);
+  }
+
+  function removeShot(id: number) {
+    setShots((prev) => (prev.length <= 2 ? prev : prev.filter((s) => s.id !== id)));
+  }
+
+  function updateShot(id: number, field: "prompt" | "duration", val: string | number) {
+    setShots((prev) =>
+      prev.map((s) => (s.id === id ? { ...s, [field]: val } : s))
+    );
+  }
+
+  const totalShotDuration = shots.reduce((sum, s) => sum + s.duration, 0);
+  const canSubmitMultiShot = multiShotMode && shots.length >= 2 && shots.every((s) => s.prompt.trim());
+
   return (
     <div className="min-h-screen bg-background flex items-start justify-center p-4 pt-12">
-      <div className="w-full max-w-2xl space-y-6">
+      <div className="w-full max-w-4xl flex gap-6">
+        {/* Sidebar */}
+        <PromptSidebar
+          versions={versions}
+          loading={versionsLoading}
+          activeVersionId={activeVersionId}
+          onSelect={handleSelectVersion}
+          onAddLabel={setLabel}
+          onRemoveLabel={removeLabel}
+        />
+
+        {/* Main content */}
+        <div className="flex-1 min-w-0 space-y-6">
         {/* Header */}
         <div>
           <h1 className="text-2xl font-semibold tracking-tight">AutoUGC</h1>
           <p className="text-sm text-muted-foreground mt-1">
             O3 Reference-to-Video — paste images, write a prompt, get a video.
           </p>
+        </div>
+
+        {/* Preset loader */}
+        <div className="flex items-center gap-3">
+          <span className="text-xs text-muted-foreground">Presets</span>
+          {Object.entries(PRESETS).map(([key, preset]) => (
+            <button
+              key={key}
+              type="button"
+              onClick={() => loadPreset(key as keyof typeof PRESETS)}
+              disabled={isRunning}
+              className={`text-xs px-3 py-1.5 rounded-md border flex items-center gap-1.5 transition-colors ${
+                activePreset === key
+                  ? "border-primary bg-primary/10 text-primary"
+                  : "border-border text-muted-foreground hover:text-foreground hover:bg-secondary"
+              }`}
+            >
+              <Package size={12} />
+              {preset.label}
+            </button>
+          ))}
+          {activePreset && (
+            <span className="text-xs text-muted-foreground">
+              Assets loaded — edit prompt below
+            </span>
+          )}
         </div>
 
         <form onSubmit={handleSubmit} className="space-y-5">
@@ -76,16 +233,18 @@ export function GenerateForm() {
             />
           </Field>
 
-          {/* End Image */}
-          <Field label="End Image" hint="Anchors the last frame — leave empty to loop back to start">
-            <FileOrUrlInput
-              value={endImageUrl}
-              onChange={setEndImageUrl}
-              accept="image/*"
-              placeholder="https://... (optional end frame)"
-              disabled={isRunning}
-            />
-          </Field>
+          {/* End Image — hidden in multi-shot (Fal rejects end_image_url with multi_prompt) */}
+          {!multiShotMode && (
+            <Field label="End Image" hint="Anchors the last frame — leave empty to loop back to start">
+              <FileOrUrlInput
+                value={endImageUrl}
+                onChange={setEndImageUrl}
+                accept="image/*"
+                placeholder="https://... (optional end frame)"
+                disabled={isRunning}
+              />
+            </Field>
+          )}
 
           {/* Product Reference Images */}
           <Field label="Product Reference Images" hint="Multi-angle photos for identity element (@Element1)">
@@ -137,18 +296,136 @@ export function GenerateForm() {
             />
           </Field>
 
-          {/* Prompt */}
-          <Field label="Prompt" required hint="Use @Element1 to reference the product">
-            <textarea
-              required
-              rows={4}
-              placeholder="Close-up of a hand holding @Element1 vertically. The index finger presses down on one keycap of @Element1, it clicks down and springs back..."
-              value={prompt}
-              onChange={(e) => setPrompt(e.target.value)}
-              className="input-field resize-y min-h-[100px]"
-              disabled={isRunning}
-            />
-          </Field>
+          {/* Prompt mode toggle */}
+          <div className="flex items-center gap-2">
+            <span className="text-sm font-medium">Prompt</span>
+            <span className="text-destructive ml-0.5">*</span>
+            <div className="ml-auto flex items-center gap-1 text-xs">
+              <button
+                type="button"
+                onClick={() => { setMultiShotMode(false); setActiveVersionId(null); setActiveVersionNum(null); }}
+                disabled={isRunning}
+                className={`px-2.5 py-1 rounded-l-md border transition-colors ${
+                  !multiShotMode
+                    ? "bg-primary text-primary-foreground border-primary"
+                    : "bg-background text-muted-foreground border-border hover:text-foreground"
+                }`}
+              >
+                Single shot
+              </button>
+              <button
+                type="button"
+                onClick={() => { setMultiShotMode(true); setEndImageUrl(""); setActiveVersionId(null); setActiveVersionNum(null); }}
+                disabled={isRunning}
+                className={`px-2.5 py-1 rounded-r-md border transition-colors ${
+                  multiShotMode
+                    ? "bg-primary text-primary-foreground border-primary"
+                    : "bg-background text-muted-foreground border-border hover:text-foreground"
+                }`}
+              >
+                Multi-shot
+              </button>
+            </div>
+          </div>
+
+          {!multiShotMode ? (
+            /* Single-shot prompt */
+            <Field label="" hint="Use @Element1 to reference the product">
+              <div className="relative">
+                <textarea
+                  required
+                  rows={4}
+                  placeholder="Close-up of a hand holding @Element1 vertically. The index finger presses down on one keycap of @Element1, it clicks down and springs back..."
+                  value={prompt}
+                  onChange={(e) => {
+                    setPrompt(e.target.value);
+                    setActiveVersionId(null);
+                    setActiveVersionNum(null);
+                  }}
+                  className="input-field resize-y min-h-[100px]"
+                  disabled={isRunning}
+                />
+                {activeVersionNum && (
+                  <span className="absolute top-2 right-2 text-[10px] px-1.5 py-0.5 rounded bg-primary/10 text-primary font-medium">
+                    v{activeVersionNum}
+                  </span>
+                )}
+              </div>
+            </Field>
+          ) : (
+            /* Multi-shot prompt editor */
+            <div className="space-y-3">
+              <span className="block text-xs text-muted-foreground">
+                Define individual shots with their own prompt and duration. Min 2 shots.
+              </span>
+              {shots.map((shot, idx) => (
+                <div key={shot.id} className="border border-border rounded-lg overflow-hidden">
+                  <div className="flex items-center gap-2 px-3 py-2 bg-secondary/30 border-b border-border">
+                    <span className="text-xs font-medium">Shot {idx + 1}</span>
+                    <div className="ml-auto flex items-center gap-2">
+                      <label className="text-xs text-muted-foreground">Duration</label>
+                      <select
+                        value={shot.duration}
+                        onChange={(e) => updateShot(shot.id, "duration", Number(e.target.value))}
+                        className="input-field !py-1 !px-2 !text-xs w-16"
+                        disabled={isRunning}
+                      >
+                        {SHOT_DURATION_OPTIONS.map((d) => (
+                          <option key={d} value={d}>{d}s</option>
+                        ))}
+                      </select>
+                      {shots.length > 2 && (
+                        <button
+                          type="button"
+                          onClick={() => removeShot(shot.id)}
+                          className="p-1 text-muted-foreground hover:text-destructive transition-colors"
+                          disabled={isRunning}
+                        >
+                          <Trash2 size={14} />
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                  <textarea
+                    rows={3}
+                    maxLength={512}
+                    placeholder={`Shot ${idx + 1} prompt — e.g. "Hand holds @Element1 steady, camera zooms in..."`}
+                    value={shot.prompt}
+                    onChange={(e) => {
+                      updateShot(shot.id, "prompt", e.target.value);
+                      setActiveVersionId(null);
+                      setActiveVersionNum(null);
+                    }}
+                    className="w-full bg-transparent px-3 py-2.5 text-sm resize-y min-h-[80px] focus:outline-none placeholder:text-muted-foreground/50"
+                    disabled={isRunning}
+                  />
+                  <div className="px-3 pb-1.5 flex justify-end">
+                    <span className={`text-[10px] ${shot.prompt.length > 480 ? "text-destructive" : "text-muted-foreground/50"}`}>
+                      {shot.prompt.length}/512
+                    </span>
+                  </div>
+                </div>
+              ))}
+              <div className="flex items-center justify-between">
+                <button
+                  type="button"
+                  onClick={addShot}
+                  className="text-xs text-muted-foreground hover:text-foreground flex items-center gap-1 transition-colors"
+                  disabled={isRunning}
+                >
+                  <Plus size={14} /> Add shot
+                </button>
+                <span className="text-xs text-muted-foreground">
+                  {shots.length} shots &middot; {totalShotDuration}s total
+                  {activeVersionNum && (
+                    <span className="ml-2 px-1.5 py-0.5 rounded bg-primary/10 text-primary font-medium">
+                      v{activeVersionNum}
+                    </span>
+                  )}
+                </span>
+              </div>
+            </div>
+          )}
 
           {/* Negative Prompt */}
           <Field label="Negative Prompt" hint="What to avoid in the generated video">
@@ -162,20 +439,22 @@ export function GenerateForm() {
             />
           </Field>
 
-          {/* Config row */}
-          <div className="grid grid-cols-3 gap-4">
-            <Field label="Duration">
-              <select
-                value={duration}
-                onChange={(e) => setDuration(Number(e.target.value))}
-                className="input-field"
-                disabled={isRunning}
-              >
-                {DURATION_OPTIONS.map((d) => (
-                  <option key={d} value={d}>{d}s</option>
-                ))}
-              </select>
-            </Field>
+          {/* Config row — Duration hidden in multi-shot (each shot has its own) */}
+          <div className={`grid gap-4 ${multiShotMode ? "grid-cols-2" : "grid-cols-3"}`}>
+            {!multiShotMode && (
+              <Field label="Duration">
+                <select
+                  value={duration}
+                  onChange={(e) => setDuration(Number(e.target.value))}
+                  className="input-field"
+                  disabled={isRunning}
+                >
+                  {DURATION_OPTIONS.map((d) => (
+                    <option key={d} value={d}>{d}s</option>
+                  ))}
+                </select>
+              </Field>
+            )}
 
             <Field label="Aspect Ratio">
               <select
@@ -204,11 +483,11 @@ export function GenerateForm() {
             </Field>
           </div>
 
-          {/* Submit / Cancel */}
-          <div className="flex gap-3">
+          {/* Submit / Cancel / Save */}
+          <div className="flex gap-3 items-center">
             <button
               type="submit"
-              disabled={isRunning || !prompt || !startImageUrl}
+              disabled={isRunning || !startImageUrl || (multiShotMode ? !canSubmitMultiShot : !prompt)}
               className="btn-primary flex items-center gap-2"
             >
               {isRunning ? (
@@ -223,10 +502,22 @@ export function GenerateForm() {
                 </>
               )}
             </button>
+            <button
+              type="button"
+              onClick={handleSavePrompt}
+              disabled={isRunning || (multiShotMode ? !canSubmitMultiShot : !prompt.trim())}
+              className="btn-secondary flex items-center gap-2"
+            >
+              <Save size={16} />
+              Save Prompt
+            </button>
             {isRunning && (
               <button type="button" onClick={cancel} className="btn-secondary flex items-center gap-2">
                 <X size={16} /> Cancel
               </button>
+            )}
+            {saveFeedback && (
+              <span className="text-xs text-green-600">{saveFeedback}</span>
             )}
           </div>
         </form>
@@ -252,7 +543,7 @@ export function GenerateForm() {
               loop
               className="w-full"
             />
-            <div className="p-3 border-t">
+            <div className="p-3 border-t flex items-center justify-between">
               <a
                 href={videoUrl}
                 target="_blank"
@@ -261,10 +552,16 @@ export function GenerateForm() {
               >
                 Open in new tab
               </a>
+              <GenerationCard
+                traceId={traceId}
+                onRate={rateGeneration}
+                onAnnotate={annotateGeneration}
+              />
             </div>
           </div>
         )}
-      </div>
+        </div>{/* end main content */}
+      </div>{/* end flex row */}
     </div>
   );
 }

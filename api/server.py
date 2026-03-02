@@ -60,13 +60,23 @@ async def root():
         "endpoints": {
             "health": "/health",
             "generate": "POST /api/v1/generate",
+            "prompts": "GET/POST /api/v1/prompts",
+            "traces": "PUT /api/v1/traces/:id",
         },
     }
 
 
+from src.prompt_store import PromptStore
 from api.routes.generate import router as generate_router
+from api.routes import prompts as prompts_module
+from api.routes.prompts import router as prompts_router
+
+# Shared prompt store
+_prompt_store = PromptStore()
+prompts_module.store = _prompt_store
 
 app.include_router(generate_router, prefix="/api/v1", tags=["generate"])
+app.include_router(prompts_router, prefix="/api/v1", tags=["prompts"])
 
 
 if __name__ == "__main__":
