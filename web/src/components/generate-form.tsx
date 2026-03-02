@@ -66,10 +66,11 @@ export function GenerateForm() {
 
   function loadPreset(key: keyof typeof PRESETS) {
     const p = PRESETS[key];
-    setStartImageUrl(p.startImage);
-    setEndImageUrl(p.endImage);
-    setProductImages(p.productImages.map((url, i) => ({ id: nextId.current++, url })));
-    setProductVideoUrl(p.productVideo);
+    const base = window.location.origin;
+    setStartImageUrl(`${base}${p.startImage}`);
+    setEndImageUrl(`${base}${p.endImage}`);
+    setProductImages(p.productImages.map((url, i) => ({ id: nextId.current++, url: `${base}${url}` })));
+    setProductVideoUrl(p.productVideo ? `${base}${p.productVideo}` : "");
     setActivePreset(key);
   }
 
