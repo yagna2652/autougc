@@ -1,69 +1,101 @@
 """
-Prompt Trace API routes — browse, inspect, and compare prompt traces.
+Prompt versioning API routes.
 
-Endpoints:
-- GET /prompts/traces          — list trace summaries (paginated, filterable)
-- GET /prompts/traces/{id}     — full trace detail
-- GET /prompts/templates       — all template versions with run counts
-- GET /prompts/compare         — side-by-side comparison of two traces
+CRUD for prompt versions, labels, and generation trace ratings.
 """
 
-import logging
-from typing import Optional
-
-from fastapi import APIRouter, HTTPException, Query
-
-from src.prompt_store import get_prompt_store
-
-logger = logging.getLogger(__name__)
+from fastapi import APIRouter, HTTPException
+from pydantic import BaseModel, Field
 
 router = APIRouter()
 
+# Store will be set by server.py at startup
+store = None
 
-@router.get("/prompts/traces")
-async def list_traces(
-    limit: int = Query(50, ge=1, le=200),
-    offset: int = Query(0, ge=0),
-    template_version: Optional[int] = Query(None),
-    job_id: Optional[str] = Query(None),
-):
-    """Return paginated trace summaries."""
-    store = get_prompt_store()
-    traces = store.list_traces(
-        limit=limit,
-        offset=offset,
-        template_version=template_version,
-        job_id=job_id,
+
+def get_store():
+    if store is None:
+        raise HTTPException(status_code=500, detail="PromptStore not initialized")
+    return store
+
+
+# ---------- Request models ----------
+
+
+class SaveVersionRequest(BaseModel):
+    prompt: str = Field(..., min_length=1)
+    negative_prompt: str = Field(default="")
+    name: str | None = None
+    change_note: str | None = None
+    model_config_data: dict | None = Field(default=None, alias="model_config")
+
+
+class SetLabelRequest(BaseModel):
+    name: str = Field(..., min_length=1)
+
+
+class UpdateTraceRequest(BaseModel):
+    rating: int | None = Field(default=None, ge=-1, le=1)
+    notes: str | None = None
+
+
+# ---------- Routes ----------
+
+
+@router.get("/prompts")
+async def list_versions(limit: int = 50, offset: int = 0):
+    return get_store().list_versions(limit=limit, offset=offset)
+
+
+@router.get("/prompts/{version_id}")
+async def get_version(version_id: str):
+    s = get_store()
+    version = s.get_version(version_id)
+    if not version:
+        raise HTTPException(status_code=404, detail="Version not found")
+    version["traces"] = s.get_traces(version_id)
+    version["labels"] = s.get_labels_for_version(version_id)
+    return version
+
+
+@router.post("/prompts")
+async def save_version(req: SaveVersionRequest):
+    return get_store().save_version(
+        prompt=req.prompt,
+        negative_prompt=req.negative_prompt,
+        name=req.name,
+        change_note=req.change_note,
+        model_config=req.model_config_data,
     )
-    return {"traces": traces, "limit": limit, "offset": offset}
 
 
-@router.get("/prompts/templates")
-async def list_templates():
-    """Return all template versions with run counts."""
-    store = get_prompt_store()
-    versions = store.get_template_versions()
-    return {"templates": versions}
+@router.post("/prompts/{version_id}/labels")
+async def add_label(version_id: str, req: SetLabelRequest):
+    s = get_store()
+    version = s.get_version(version_id)
+    if not version:
+        raise HTTPException(status_code=404, detail="Version not found")
+    s.set_label(req.name, version_id)
+    return {"ok": True}
 
 
-@router.get("/prompts/compare")
-async def compare_traces(
-    a: str = Query(..., description="First trace ID"),
-    b: str = Query(..., description="Second trace ID"),
-):
-    """Return two full traces side by side for comparison."""
-    store = get_prompt_store()
-    result = store.compare_traces(a, b)
-    if not result:
-        raise HTTPException(status_code=404, detail="One or both traces not found")
-    return result
+@router.delete("/prompts/{version_id}/labels/{label_name}")
+async def remove_label(version_id: str, label_name: str):
+    get_store().remove_label(label_name)
+    return {"ok": True}
 
 
-@router.get("/prompts/traces/{trace_id}")
-async def get_trace(trace_id: str):
-    """Return full trace detail."""
-    store = get_prompt_store()
-    trace = store.get_trace(trace_id)
+@router.put("/traces/{trace_id}")
+async def update_trace(trace_id: str, req: UpdateTraceRequest):
+    s = get_store()
+    trace = s.get_trace(trace_id)
     if not trace:
         raise HTTPException(status_code=404, detail="Trace not found")
-    return trace
+    kwargs = {}
+    if req.rating is not None:
+        kwargs["rating"] = req.rating
+    if req.notes is not None:
+        kwargs["notes"] = req.notes
+    if kwargs:
+        s.update_trace(trace_id, **kwargs)
+    return {"ok": True}

@@ -4,6 +4,7 @@
   "private": true,
   "scripts": {
     "dev": "next dev --webpack",
+    "dev:all": "next dev --webpack & cd .. && .venv/bin/python -m uvicorn api.server:app --reload --port 8000",
     "build": "next build",
     "start": "next start",
     "lint": "next lint"

@@ -1,10 +1,5 @@
-"""
-API routes package.
+"""API routes package."""
 
-Available routers:
-- pipeline: UGC video generation pipeline endpoints
-"""
+from api.routes.generate import router as generate_router
 
-from api.routes.pipeline import router as pipeline_router
-
-__all__ = ["pipeline_router"]
+__all__ = ["generate_router"]

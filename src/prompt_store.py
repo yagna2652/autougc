@@ -1,316 +1,285 @@
 """
-Local Prompt Trace Store — SQLite-backed storage for prompt versioning and tracing.
+PromptStore — SQLite-backed prompt versioning with content-addressable hashing.
 
-Captures the full assembled prompt, raw LLM response, processed output, template
-version (auto-detected via hash), token usage, and latency for every generate_prompt
-run. Persists to data/prompts.db across server restarts.
-
-Zero external dependencies — uses Python's built-in sqlite3.
+Immutable prompt versions, mutable labels, and generation traces.
 """
 
 import hashlib
 import json
-import logging
-import os
 import sqlite3
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Optional
-
-logger = logging.getLogger(__name__)
-
-# DB lives next to the project root, gitignored
-_DB_DIR = Path(__file__).resolve().parent.parent / "data"
-_DB_PATH = _DB_DIR / "prompts.db"
+from typing import Any
 
 
 class PromptStore:
-    """SQLite-backed store for prompt traces and template versions."""
+    def __init__(self, db_path: str | Path = "data/prompts.db"):
+        self.db_path = Path(db_path)
+        self.db_path.parent.mkdir(parents=True, exist_ok=True)
+        self.conn = sqlite3.connect(str(self.db_path), check_same_thread=False)
+        self.conn.row_factory = sqlite3.Row
+        self.conn.execute("PRAGMA journal_mode=WAL")
+        self.conn.execute("PRAGMA foreign_keys=ON")
+        self._init_tables()
 
-    def __init__(self, db_path: Optional[Path] = None):
-        self._db_path = db_path or _DB_PATH
-        self._db_path.parent.mkdir(parents=True, exist_ok=True)
-        self._init_db()
+    def _init_tables(self):
+        self.conn.executescript("""
+            CREATE TABLE IF NOT EXISTS prompt_versions (
+                id TEXT PRIMARY KEY,
+                content_hash TEXT UNIQUE NOT NULL,
+                version INTEGER NOT NULL,
+                prompt TEXT NOT NULL,
+                negative_prompt TEXT NOT NULL DEFAULT '',
+                name TEXT,
+                change_note TEXT,
+                model_config TEXT,
+                created_at TEXT NOT NULL
+            );
 
-    # ------------------------------------------------------------------
-    # Database setup
-    # ------------------------------------------------------------------
+            CREATE TABLE IF NOT EXISTS labels (
+                name TEXT PRIMARY KEY,
+                prompt_version_id TEXT NOT NULL REFERENCES prompt_versions(id),
+                updated_at TEXT NOT NULL
+            );
 
-    def _get_conn(self) -> sqlite3.Connection:
-        conn = sqlite3.connect(str(self._db_path))
-        conn.row_factory = sqlite3.Row
-        conn.execute("PRAGMA journal_mode=WAL")
-        conn.execute("PRAGMA foreign_keys=ON")
-        return conn
-
-    def _init_db(self) -> None:
-        with self._get_conn() as conn:
-            conn.executescript("""
-                CREATE TABLE IF NOT EXISTS template_versions (
-                    hash            TEXT PRIMARY KEY,
-                    version_number  INTEGER NOT NULL,
-                    template_text   TEXT NOT NULL,
-                    first_seen      TEXT NOT NULL
-                );
-
-                CREATE TABLE IF NOT EXISTS prompt_traces (
-                    trace_id         TEXT PRIMARY KEY,
-                    job_id           TEXT,
-                    template_hash    TEXT NOT NULL,
-                    assembled_prompt TEXT NOT NULL,
-                    model            TEXT NOT NULL,
-                    inputs_snapshot  TEXT NOT NULL,
-                    raw_response     TEXT,
-                    processed_output TEXT,
-                    token_usage      TEXT,
-                    latency_ms       INTEGER,
-                    created_at       TEXT NOT NULL,
-                    FOREIGN KEY (template_hash) REFERENCES template_versions(hash)
-                );
-
-                CREATE INDEX IF NOT EXISTS idx_traces_job
-                    ON prompt_traces(job_id);
-                CREATE INDEX IF NOT EXISTS idx_traces_template
-                    ON prompt_traces(template_hash);
-                CREATE INDEX IF NOT EXISTS idx_traces_created
-                    ON prompt_traces(created_at DESC);
-            """)
-        logger.info(f"Prompt store ready at {self._db_path}")
-
-    # ------------------------------------------------------------------
-    # Template version management
-    # ------------------------------------------------------------------
+            CREATE TABLE IF NOT EXISTS generation_traces (
+                id TEXT PRIMARY KEY,
+                prompt_version_id TEXT NOT NULL REFERENCES prompt_versions(id),
+                job_id TEXT,
+                start_image_url TEXT,
+                end_image_url TEXT,
+                product_images TEXT,
+                product_video_url TEXT,
+                video_url TEXT,
+                elapsed_seconds REAL,
+                status TEXT NOT NULL DEFAULT 'pending',
+                error_message TEXT,
+                rating INTEGER,
+                notes TEXT,
+                created_at TEXT NOT NULL
+            );
+        """)
+        self.conn.commit()
 
     @staticmethod
-    def hash_template(template_text: str) -> str:
-        return hashlib.sha256(template_text.encode()).hexdigest()
+    def hash_prompt(prompt: str, negative_prompt: str = "") -> str:
+        content = prompt + "\x00" + negative_prompt
+        return hashlib.sha256(content.encode()).hexdigest()
 
-    def _ensure_template_version(self, conn: sqlite3.Connection, template_hash: str, template_text: str) -> int:
-        """Return the version_number for this hash, creating a new version if needed."""
-        row = conn.execute(
-            "SELECT version_number FROM template_versions WHERE hash = ?",
-            (template_hash,),
+    def _next_version(self) -> int:
+        row = self.conn.execute(
+            "SELECT MAX(version) as max_v FROM prompt_versions"
         ).fetchone()
-        if row:
-            return row["version_number"]
+        return (row["max_v"] or 0) + 1
 
-        # New hash — assign next version number
-        max_row = conn.execute(
-            "SELECT COALESCE(MAX(version_number), 0) AS mx FROM template_versions"
+    def save_version(
+        self,
+        prompt: str,
+        negative_prompt: str = "",
+        name: str | None = None,
+        change_note: str | None = None,
+        model_config: dict | None = None,
+    ) -> dict[str, Any]:
+        content_hash = self.hash_prompt(prompt, negative_prompt)
+
+        existing = self.conn.execute(
+            "SELECT id, version FROM prompt_versions WHERE content_hash = ?",
+            (content_hash,),
         ).fetchone()
-        next_version = max_row["mx"] + 1
 
-        conn.execute(
-            "INSERT INTO template_versions (hash, version_number, template_text, first_seen) VALUES (?, ?, ?, ?)",
-            (template_hash, next_version, template_text, _now_iso()),
+        if existing:
+            return {"id": existing["id"], "version": existing["version"], "is_new": False}
+
+        version_id = str(uuid.uuid4())
+        version_num = self._next_version()
+        now = datetime.now(timezone.utc).isoformat()
+
+        self.conn.execute(
+            """INSERT INTO prompt_versions
+               (id, content_hash, version, prompt, negative_prompt, name, change_note, model_config, created_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (
+                version_id,
+                content_hash,
+                version_num,
+                prompt,
+                negative_prompt,
+                name,
+                change_note,
+                json.dumps(model_config) if model_config else None,
+                now,
+            ),
         )
-        logger.info(f"New template version v{next_version} (hash: {template_hash[:12]}...)")
-        return next_version
+        self.conn.commit()
+        return {"id": version_id, "version": version_num, "is_new": True}
 
-    # ------------------------------------------------------------------
-    # Save a trace
-    # ------------------------------------------------------------------
+    def get_version(self, version_id: str) -> dict[str, Any] | None:
+        row = self.conn.execute(
+            "SELECT * FROM prompt_versions WHERE id = ?", (version_id,)
+        ).fetchone()
+        if not row:
+            return None
+        d = dict(row)
+        if d["model_config"]:
+            d["model_config"] = json.loads(d["model_config"])
+        return d
+
+    def list_versions(self, limit: int = 50, offset: int = 0) -> list[dict[str, Any]]:
+        rows = self.conn.execute(
+            """
+            SELECT
+                pv.id, pv.version, pv.prompt, pv.negative_prompt,
+                pv.name, pv.created_at,
+                COUNT(gt.id) as trace_count,
+                AVG(CASE WHEN gt.rating IS NOT NULL THEN gt.rating END) as avg_rating
+            FROM prompt_versions pv
+            LEFT JOIN generation_traces gt ON gt.prompt_version_id = pv.id
+            GROUP BY pv.id
+            ORDER BY pv.version DESC
+            LIMIT ? OFFSET ?
+            """,
+            (limit, offset),
+        ).fetchall()
+
+        results = []
+        for row in rows:
+            d = dict(row)
+            d["prompt_preview"] = d.pop("prompt")[:80]
+            d.pop("negative_prompt")
+            # Attach labels
+            label_rows = self.conn.execute(
+                "SELECT name FROM labels WHERE prompt_version_id = ?", (d["id"],)
+            ).fetchall()
+            d["labels"] = [lr["name"] for lr in label_rows]
+            results.append(d)
+        return results
 
     def save_trace(
         self,
-        *,
-        template_text: str,
-        assembled_prompt: str,
-        model: str,
-        inputs_snapshot: dict[str, Any],
-        job_id: Optional[str] = None,
-        raw_response: Optional[str] = None,
-        processed_output: Optional[dict[str, Any]] = None,
-        token_usage: Optional[dict[str, int]] = None,
-        latency_ms: Optional[int] = None,
+        prompt_version_id: str,
+        job_id: str | None = None,
+        start_image_url: str | None = None,
+        end_image_url: str | None = None,
+        product_images: list[str] | None = None,
+        product_video_url: str | None = None,
+        video_url: str | None = None,
+        elapsed_seconds: float | None = None,
+        status: str = "pending",
+        error_message: str | None = None,
     ) -> str:
-        """
-        Record a prompt trace. Auto-creates template version if hash is new.
-
-        Returns the trace_id (UUID).
-        """
         trace_id = str(uuid.uuid4())
-        template_hash = self.hash_template(template_text)
-
-        with self._get_conn() as conn:
-            self._ensure_template_version(conn, template_hash, template_text)
-            conn.execute(
-                """INSERT INTO prompt_traces
-                   (trace_id, job_id, template_hash, assembled_prompt, model,
-                    inputs_snapshot, raw_response, processed_output,
-                    token_usage, latency_ms, created_at)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-                (
-                    trace_id,
-                    job_id,
-                    template_hash,
-                    assembled_prompt,
-                    model,
-                    json.dumps(inputs_snapshot),
-                    raw_response,
-                    json.dumps(processed_output) if processed_output else None,
-                    json.dumps(token_usage) if token_usage else None,
-                    latency_ms,
-                    _now_iso(),
-                ),
-            )
-
-        logger.info(f"Saved trace {trace_id[:8]}... for job {(job_id or 'none')[:8]}")
+        now = datetime.now(timezone.utc).isoformat()
+        self.conn.execute(
+            """INSERT INTO generation_traces
+               (id, prompt_version_id, job_id, start_image_url, end_image_url,
+                product_images, product_video_url, video_url, elapsed_seconds,
+                status, error_message, created_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (
+                trace_id,
+                prompt_version_id,
+                job_id,
+                start_image_url,
+                end_image_url,
+                json.dumps(product_images) if product_images else None,
+                product_video_url,
+                video_url,
+                elapsed_seconds,
+                status,
+                error_message,
+                now,
+            ),
+        )
+        self.conn.commit()
         return trace_id
 
-    # ------------------------------------------------------------------
-    # Query traces
-    # ------------------------------------------------------------------
-
-    def get_trace(self, trace_id: str) -> Optional[dict[str, Any]]:
-        """Return full trace data including template version number."""
-        with self._get_conn() as conn:
-            row = conn.execute(
-                """SELECT t.*, tv.version_number
-                   FROM prompt_traces t
-                   JOIN template_versions tv ON t.template_hash = tv.hash
-                   WHERE t.trace_id = ?""",
-                (trace_id,),
-            ).fetchone()
-        return _row_to_trace(row) if row else None
-
-    def list_traces(
+    def update_trace(
         self,
-        limit: int = 50,
-        offset: int = 0,
-        template_version: Optional[int] = None,
-        job_id: Optional[str] = None,
-    ) -> list[dict[str, Any]]:
-        """Return trace summaries (no assembled_prompt or raw_response for efficiency)."""
-        query = """
-            SELECT t.trace_id, t.job_id, t.template_hash, t.model,
-                   t.token_usage, t.latency_ms, t.created_at,
-                   tv.version_number
-            FROM prompt_traces t
-            JOIN template_versions tv ON t.template_hash = tv.hash
-            WHERE 1=1
-        """
-        params: list[Any] = []
+        trace_id: str,
+        video_url: str | None = None,
+        elapsed_seconds: float | None = None,
+        status: str | None = None,
+        error_message: str | None = None,
+        rating: int | None = None,
+        notes: str | None = None,
+    ) -> None:
+        updates = []
+        params = []
+        if video_url is not None:
+            updates.append("video_url = ?")
+            params.append(video_url)
+        if elapsed_seconds is not None:
+            updates.append("elapsed_seconds = ?")
+            params.append(elapsed_seconds)
+        if status is not None:
+            updates.append("status = ?")
+            params.append(status)
+        if error_message is not None:
+            updates.append("error_message = ?")
+            params.append(error_message)
+        if rating is not None:
+            updates.append("rating = ?")
+            params.append(rating)
+        if notes is not None:
+            updates.append("notes = ?")
+            params.append(notes)
+        if not updates:
+            return
+        params.append(trace_id)
+        self.conn.execute(
+            f"UPDATE generation_traces SET {', '.join(updates)} WHERE id = ?",
+            params,
+        )
+        self.conn.commit()
 
-        if template_version is not None:
-            query += " AND tv.version_number = ?"
-            params.append(template_version)
-        if job_id is not None:
-            query += " AND t.job_id = ?"
-            params.append(job_id)
+    def get_traces(self, prompt_version_id: str) -> list[dict[str, Any]]:
+        rows = self.conn.execute(
+            """SELECT * FROM generation_traces
+               WHERE prompt_version_id = ?
+               ORDER BY created_at DESC""",
+            (prompt_version_id,),
+        ).fetchall()
+        results = []
+        for row in rows:
+            d = dict(row)
+            if d["product_images"]:
+                d["product_images"] = json.loads(d["product_images"])
+            results.append(d)
+        return results
 
-        query += " ORDER BY t.created_at DESC LIMIT ? OFFSET ?"
-        params.extend([limit, offset])
-
-        with self._get_conn() as conn:
-            rows = conn.execute(query, params).fetchall()
-
-        return [_row_to_summary(r) for r in rows]
-
-    def get_template_versions(self) -> list[dict[str, Any]]:
-        """Return all template versions with run counts."""
-        with self._get_conn() as conn:
-            rows = conn.execute(
-                """SELECT tv.hash, tv.version_number, tv.first_seen,
-                          COUNT(t.trace_id) AS run_count
-                   FROM template_versions tv
-                   LEFT JOIN prompt_traces t ON tv.hash = t.template_hash
-                   GROUP BY tv.hash
-                   ORDER BY tv.version_number DESC"""
-            ).fetchall()
-
-        return [
-            {
-                "hash": r["hash"],
-                "version_number": r["version_number"],
-                "first_seen": r["first_seen"],
-                "run_count": r["run_count"],
-            }
-            for r in rows
-        ]
-
-    def compare_traces(self, trace_id_a: str, trace_id_b: str) -> Optional[dict[str, Any]]:
-        """Return two full traces side by side for comparison."""
-        a = self.get_trace(trace_id_a)
-        b = self.get_trace(trace_id_b)
-        if not a or not b:
+    def get_trace(self, trace_id: str) -> dict[str, Any] | None:
+        row = self.conn.execute(
+            "SELECT * FROM generation_traces WHERE id = ?", (trace_id,)
+        ).fetchone()
+        if not row:
             return None
-        return {"a": a, "b": b}
+        d = dict(row)
+        if d["product_images"]:
+            d["product_images"] = json.loads(d["product_images"])
+        return d
 
-    def get_trace_by_job(self, job_id: str) -> Optional[dict[str, Any]]:
-        """Return the trace for a given job_id (most recent if multiple)."""
-        with self._get_conn() as conn:
-            row = conn.execute(
-                """SELECT t.*, tv.version_number
-                   FROM prompt_traces t
-                   JOIN template_versions tv ON t.template_hash = tv.hash
-                   WHERE t.job_id = ?
-                   ORDER BY t.created_at DESC
-                   LIMIT 1""",
-                (job_id,),
-            ).fetchone()
-        return _row_to_trace(row) if row else None
+    def set_label(self, name: str, prompt_version_id: str) -> None:
+        now = datetime.now(timezone.utc).isoformat()
+        self.conn.execute(
+            """INSERT INTO labels (name, prompt_version_id, updated_at)
+               VALUES (?, ?, ?)
+               ON CONFLICT(name) DO UPDATE SET prompt_version_id = ?, updated_at = ?""",
+            (name, prompt_version_id, now, prompt_version_id, now),
+        )
+        self.conn.commit()
 
+    def remove_label(self, name: str) -> None:
+        self.conn.execute("DELETE FROM labels WHERE name = ?", (name,))
+        self.conn.commit()
 
-# ------------------------------------------------------------------
-# Module-level singleton
-# ------------------------------------------------------------------
+    def list_labels(self) -> list[dict[str, Any]]:
+        rows = self.conn.execute("SELECT * FROM labels ORDER BY name").fetchall()
+        return [dict(r) for r in rows]
 
-_store: Optional[PromptStore] = None
-
-
-def get_prompt_store() -> PromptStore:
-    """Return (and lazily create) the global PromptStore singleton."""
-    global _store
-    if _store is None:
-        _store = PromptStore()
-    return _store
-
-
-# ------------------------------------------------------------------
-# Helpers
-# ------------------------------------------------------------------
-
-
-def _now_iso() -> str:
-    return datetime.now(timezone.utc).isoformat()
-
-
-def _parse_json_field(val: Optional[str]) -> Any:
-    if val is None:
-        return None
-    try:
-        return json.loads(val)
-    except (json.JSONDecodeError, TypeError):
-        return val
-
-
-def _row_to_trace(row: sqlite3.Row) -> dict[str, Any]:
-    return {
-        "trace_id": row["trace_id"],
-        "job_id": row["job_id"],
-        "template_hash": row["template_hash"],
-        "template_version": row["version_number"],
-        "assembled_prompt": row["assembled_prompt"],
-        "model": row["model"],
-        "inputs_snapshot": _parse_json_field(row["inputs_snapshot"]),
-        "raw_response": row["raw_response"],
-        "processed_output": _parse_json_field(row["processed_output"]),
-        "token_usage": _parse_json_field(row["token_usage"]),
-        "latency_ms": row["latency_ms"],
-        "created_at": row["created_at"],
-    }
-
-
-def _row_to_summary(row: sqlite3.Row) -> dict[str, Any]:
-    return {
-        "trace_id": row["trace_id"],
-        "job_id": row["job_id"],
-        "template_hash": row["template_hash"],
-        "template_version": row["version_number"],
-        "model": row["model"],
-        "token_usage": _parse_json_field(row["token_usage"]),
-        "latency_ms": row["latency_ms"],
-        "created_at": row["created_at"],
-    }
+    def get_labels_for_version(self, prompt_version_id: str) -> list[str]:
+        rows = self.conn.execute(
+            "SELECT name FROM labels WHERE prompt_version_id = ? ORDER BY name",
+            (prompt_version_id,),
+        ).fetchall()
+        return [r["name"] for r in rows]

@@ -64,15 +64,58 @@ body {
   color: var(--color-foreground);
 }
 
-@keyframes pulse-border {
-  0%, 100% { opacity: 0.4; }
-  50% { opacity: 1; }
+/* Form controls */
+.input-field {
+  width: 100%;
+  padding: 0.5rem 0.75rem;
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  background-color: var(--background);
+  color: var(--foreground);
+  font-size: 0.875rem;
+  transition: border-color 0.15s;
+}
+.input-field:focus {
+  outline: none;
+  border-color: var(--ring);
+  box-shadow: 0 0 0 2px oklch(0.556 0 0 / 20%);
+}
+.input-field:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.input-field::placeholder {
+  color: var(--muted-foreground);
 }
 
-@keyframes dash-flow {
-  to { stroke-dashoffset: -20; }
+.btn-primary {
+  padding: 0.5rem 1.25rem;
+  border-radius: var(--radius);
+  background-color: var(--primary);
+  color: var(--primary-foreground);
+  font-size: 0.875rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: opacity 0.15s;
+}
+.btn-primary:hover:not(:disabled) {
+  opacity: 0.9;
+}
+.btn-primary:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 
-@keyframes spin-slow {
-  to { transform: rotate(360deg); }
+.btn-secondary {
+  padding: 0.5rem 1.25rem;
+  border-radius: var(--radius);
+  background-color: var(--secondary);
+  color: var(--secondary-foreground);
+  font-size: 0.875rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: opacity 0.15s;
+}
+.btn-secondary:hover:not(:disabled) {
+  opacity: 0.8;
 }
